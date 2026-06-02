@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { Eye, EyeOff, Loader2, ArrowLeft } from 'lucide-react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faGithub, faGoogle, faWeixin, faQq } from '@fortawesome/free-brands-svg-icons';
+import { faGithub } from '@fortawesome/free-brands-svg-icons';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/contexts/AuthContext';
@@ -406,30 +406,18 @@ export function Login() {
                 <button
                   type="button"
                   className="w-10 h-10 rounded-full border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
-                  title="微信登录"
+                  title="Gitee 登录"
                 >
-                  <FontAwesomeIcon icon={faWeixin} className="h-4 w-4" />
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M11.984 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.016 0zm6.09 5.333c.328 0 .593.266.593.593v3.633h3.633a.593.593 0 0 1 0 1.186h-3.633v3.633a.593.593 0 0 1-1.186 0v-3.633h-3.633a.593.593 0 0 1 0-1.186h3.633V5.926c0-.327.266-.593.593-.593zM5.333 10.667a6.667 6.667 0 0 1 13.334 0v.44H5.333v-.44zm0 1.777h13.334v.44a6.667 6.667 0 0 1-13.334 0v-.44z"/>
+                  </svg>
                 </button>
                 <button
                   type="button"
                   className="w-10 h-10 rounded-full border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
-                  title="QQ登录"
-                >
-                  <FontAwesomeIcon icon={faQq} className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  className="w-10 h-10 rounded-full border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
-                  title="GitHub登录"
+                  title="GitHub 登录"
                 >
                   <FontAwesomeIcon icon={faGithub} className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  className="w-10 h-10 rounded-full border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
-                  title="Google登录"
-                >
-                  <FontAwesomeIcon icon={faGoogle} className="h-4 w-4" />
                 </button>
               </div>
             </div>
