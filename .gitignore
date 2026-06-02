@@ -27,6 +27,9 @@ __pycache__/
 # Uploads
 uploads/
 
+# Claude
+.claude/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
