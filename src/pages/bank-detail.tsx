@@ -45,7 +45,6 @@ export function BankDetail() {
 
   // AI Import state
   const [importStep, setImportStep] = useState<'upload' | 'configure' | 'result' | null>(null);
-  const [importFile, setImportFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<{ file_id: string; filename: string; preview: string; char_count: number } | null>(null);
   const [importCount, setImportCount] = useState(10);
@@ -89,7 +88,7 @@ export function BankDetail() {
   // AI Import handlers
   const resetImport = () => {
     setImportStep(null);
-    setImportFile(null);
+    // reset
     setUploadResult(null);
     setImportError('');
     setImportResult(null);
@@ -338,7 +337,7 @@ export function BankDetail() {
                   onClick={() => fileInputRef.current?.click()}
                   onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
                   onDragLeave={() => setDragOver(false)}
-                  onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) { setImportFile(f); handleUpload(f); } }}
+                  onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) { handleUpload(f); } }}
                 >
                   {uploading ? (
                     <div className="flex flex-col items-center gap-2">
@@ -353,7 +352,7 @@ export function BankDetail() {
                     </div>
                   )}
                 </div>
-                <input ref={fileInputRef} type="file" accept=".txt,.docx" title="上传文件" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) { setImportFile(f); handleUpload(f); } }} />
+                <input ref={fileInputRef} type="file" accept=".txt,.docx" title="上传文件" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) { handleUpload(f); } }} />
                 {importError && <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-md mt-3">{importError}</p>}
               </div>
             )}

@@ -31,7 +31,6 @@ export function Skeleton({
 
   let defaultHeight = "1em"
   let defaultWidth = "100%"
-  let defaultRounded = "md"
 
   switch (type) {
     case "title":
@@ -41,7 +40,6 @@ export function Skeleton({
     case "avatar":
       defaultHeight = "48px"
       defaultWidth = "48px"
-      defaultRounded = "full"
       break
     case "card":
       defaultHeight = "180px"
