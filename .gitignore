@@ -40,3 +40,5 @@ uploads/
 *.njsproj
 *.sln
 *.sw?
+.agents/
+skills-lock.json
