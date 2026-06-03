@@ -69,3 +69,10 @@ class ChangePasswordRequest(BaseModel):
     """Change password request."""
     old_password: str = Field(..., min_length=1, max_length=128)
     new_password: str = Field(..., min_length=6, max_length=128)
+
+
+class AiTestCredentialsRequest(BaseModel):
+    """Test AI connection with provided credentials (before saving)."""
+    ai_api_key: str = Field(..., min_length=1, max_length=255)
+    ai_base_url: str = Field(..., min_length=1, max_length=500)
+    ai_model: str = Field(..., min_length=1, max_length=100)

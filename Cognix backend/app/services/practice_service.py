@@ -189,6 +189,15 @@ async def submit_answer(
     qtype = question.type.value if hasattr(question.type, "value") else str(question.type)
     if qtype == "MULTIPLE":
         correct_answers = list(question.answer)
+    elif qtype == "TRUE_FALSE":
+        # Map answer text back to letter labels for frontend display
+        # e.g., "正确" -> ["A"], "错误" -> ["B"]
+        options = question.options or []
+        if question.answer in options:
+            idx = options.index(question.answer)
+            correct_answers = [chr(ord("A") + idx)]
+        else:
+            correct_answers = [question.answer]
     else:
         correct_answers = [question.answer]
 

@@ -49,7 +49,7 @@ export function Login() {
 
   // Redirect if already logged in
   if (user) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/profile" replace />;
   }
 
   const switchToFullLogin = () => {
@@ -121,7 +121,7 @@ export function Login() {
         }
       }
 
-      navigate('/dashboard', { replace: true });
+      navigate('/profile', { replace: true });
     } catch (err: any) {
       // If login fails in pre-login hidden-password mode, show the password field
       if (preLoginMode && !needPassword) {

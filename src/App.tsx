@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { Layout } from './components/layout/layout';
@@ -8,7 +8,6 @@ import { ProtectedRoute } from './components/protected-route';
 // Lazy-loaded pages
 const Home = lazy(() => import('./pages/home').then(m => ({ default: m.Home })));
 const Login = lazy(() => import('./pages/login').then(m => ({ default: m.Login })));
-const Dashboard = lazy(() => import('./pages/dashboard').then(m => ({ default: m.Dashboard })));
 const BankList = lazy(() => import('./pages/bank-list').then(m => ({ default: m.BankList })));
 const BankDetail = lazy(() => import('./pages/bank-detail').then(m => ({ default: m.BankDetail })));
 const QuestionForm = lazy(() => import('./pages/question-form').then(m => ({ default: m.QuestionForm })));
@@ -16,7 +15,6 @@ const PracticeSetup = lazy(() => import('./pages/practice-setup').then(m => ({ d
 const PracticeSession = lazy(() => import('./pages/practice-session').then(m => ({ default: m.PracticeSession })));
 const Mistakes = lazy(() => import('./pages/mistakes').then(m => ({ default: m.Mistakes })));
 const Profile = lazy(() => import('./pages/profile').then(m => ({ default: m.Profile })));
-const ChangePassword = lazy(() => import('./pages/change-password').then(m => ({ default: m.ChangePassword })));
 
 function PageLoader() {
   return (
@@ -42,7 +40,7 @@ function App() {
               {/* Routes with layout */}
               <Route element={<Layout />}>
                 <Route path="/" element={<Home />} />
-                <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+                <Route path="/dashboard" element={<Navigate to="/profile" replace />} />
                 <Route path="/banks" element={<ProtectedRoute><BankList /></ProtectedRoute>} />
                 <Route path="/banks/:id" element={<ProtectedRoute><BankDetail /></ProtectedRoute>} />
                 <Route path="/banks/:id/questions/new" element={<ProtectedRoute><QuestionForm /></ProtectedRoute>} />
@@ -51,7 +49,6 @@ function App() {
                 <Route path="/practice/session" element={<ProtectedRoute><PracticeSession /></ProtectedRoute>} />
                 <Route path="/mistakes" element={<ProtectedRoute><Mistakes /></ProtectedRoute>} />
                 <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-                <Route path="/change-password" element={<ProtectedRoute><ChangePassword /></ProtectedRoute>} />
               </Route>
             </Routes>
           </Suspense>

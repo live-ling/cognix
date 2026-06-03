@@ -233,4 +233,15 @@
   .action-link:hover {
     text-decoration: underline;
   }
+
+  /* ===== Practice range slider ===== */
+  .practice-range-slider {
+    background: linear-gradient(
+      to right,
+      hsl(var(--primary)) 0%,
+      hsl(var(--primary)) var(--range-fill, 10%),
+      hsl(var(--border)) var(--range-fill, 10%),
+      hsl(var(--border)) 100%
+    );
+  }
 }

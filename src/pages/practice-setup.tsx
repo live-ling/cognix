@@ -179,10 +179,10 @@ export function PracticeSetup() {
               step={5}
               value={count}
               onChange={(e) => setCount(Number(e.target.value))}
-              className="w-full h-2 rounded-lg appearance-none cursor-pointer"
-              style={{
-                background: `linear-gradient(to right, hsl(var(--primary)) 0%, hsl(var(--primary)) ${((count - 5) / 95) * 100}%, hsl(var(--border)) ${((count - 5) / 95) * 100}%, hsl(var(--border)) 100%)`,
-              }}
+              className="practice-range-slider w-full h-2 rounded-lg appearance-none cursor-pointer"
+              aria-label="题目数量"
+              title="题目数量"
+              style={{ '--range-fill': `${((count - 5) / 95) * 100}%` } as React.CSSProperties}
             />
             <div className="flex justify-between text-xs text-muted-foreground mt-2">
               <span>5</span>

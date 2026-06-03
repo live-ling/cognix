@@ -213,8 +213,8 @@ export function PracticeSession() {
 
         {/* Actions */}
         <div className="flex gap-3 mt-6 justify-center">
-          <Button variant="outline" onClick={() => navigate('/dashboard')}>
-            返回仪表盘
+          <Button variant="outline" onClick={() => navigate('/profile')}>
+            返回个人主页
           </Button>
           <Button onClick={() => navigate('/practice', { state: { bankId: state.bankId } })}>
             <RotateCcw className="h-4 w-4" /> 再来一次

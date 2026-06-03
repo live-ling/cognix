@@ -286,8 +286,9 @@ export function QuestionForm() {
           <CardHeader><CardTitle className="text-base">难度 & 标签</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <label className="text-sm font-medium mb-2 block">难度</label>
+              <label htmlFor="difficulty-select" className="text-sm font-medium mb-2 block">难度</label>
               <select
+                id="difficulty-select"
                 className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 value={difficulty}
                 onChange={(e) => setDifficulty(e.target.value)}

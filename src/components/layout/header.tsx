@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
-import { Menu, X, Sun, Moon, User, LogOut, ChevronDown, Lock } from "lucide-react"
+import { Menu, X, Sun, Moon, User, LogOut, ChevronDown } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
 import { useTheme } from "@/contexts/ThemeContext"
 import { useAuth } from "@/contexts/AuthContext"
@@ -8,14 +8,14 @@ import { UserAvatar } from "@/components/user-avatar"
 
 const navLinks = [
   { to: "/", label: "首页" },
-  { to: "/dashboard", label: "仪表盘" },
+  { to: "/profile", label: "我的" },
   { to: "/banks", label: "题库" },
   { to: "/practice", label: "练习" },
   { to: "/mistakes", label: "错题本" },
 ]
 
 // Routes that should hide nav links
-const NO_NAV_ROUTES = ['/change-password']
+const NO_NAV_ROUTES: string[] = []
 
 export function Header() {
   const location = useLocation()
@@ -144,14 +144,6 @@ export function Header() {
                   >
                     <User className="h-4 w-4" />
                     个人主页
-                  </Link>
-                  <Link
-                    to="/change-password"
-                    className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent transition-colors"
-                    onClick={() => setUserMenuOpen(false)}
-                  >
-                    <Lock className="h-4 w-4" />
-                    修改密码
                   </Link>
                   <button
                     type="button"

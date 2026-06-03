@@ -16,6 +16,7 @@ from app.schemas.auth import (
     AiSettingsRequest,
     AiSettingsOut,
     AiTestResponse,
+    AiTestCredentialsRequest,
 )
 from app.schemas.common import ApiResponse
 from app.utils.auth import (
@@ -131,6 +132,34 @@ async def save_ai_settings(
     ))
 
 
+def _extract_reply(response_data: dict) -> str:
+    """Extract model reply from various response formats."""
+    choices = response_data.get("choices", [])
+    if not choices:
+        return ""
+
+    choice = choices[0]
+
+    # Standard OpenAI chat format: choices[0].message.content
+    msg = choice.get("message", {})
+    if isinstance(msg, dict):
+        content = msg.get("content", "")
+        if content:
+            return str(content).strip()
+
+    # Older completion format: choices[0].text
+    if "text" in choice and choice["text"]:
+        return str(choice["text"]).strip()
+
+    # Some models return reasoning_content in message
+    if isinstance(msg, dict):
+        reasoning = msg.get("reasoning_content", "")
+        if reasoning:
+            return str(reasoning).strip()
+
+    return ""
+
+
 @router.post("/ai-test", response_model=ApiResponse[AiTestResponse])
 async def test_ai_settings(user: User = Depends(get_current_user)):
     """Test the user's AI API connection."""
@@ -147,8 +176,12 @@ async def test_ai_settings(user: User = Depends(get_current_user)):
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     payload = {
         "model": model,
-        "messages": [{"role": "user", "content": "回复OK"}],
-        "max_tokens": 10,
+        "messages": [
+            {"role": "system", "content": "只回复单词 OK，不要回复任何其他内容。"},
+            {"role": "user", "content": "hi"},
+        ],
+        "max_tokens": 5,
+        "temperature": 0,
     }
 
     try:
@@ -156,11 +189,49 @@ async def test_ai_settings(user: User = Depends(get_current_user)):
             resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
         data = resp.json()
-        reply = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-        return ApiResponse(data=AiTestResponse(
-            success=True,
-            message=f"连接成功！模型回复: {reply.strip()[:50]}",
-        ))
+        reply = _extract_reply(data)
+        if reply:
+            message = f"连接成功！模型回复: {reply[:50]}"
+        else:
+            message = "连接成功！API 响应正常（模型未返回文本内容）"
+        return ApiResponse(data=AiTestResponse(success=True, message=message))
+    except httpx.TimeoutException:
+        return ApiResponse(data=AiTestResponse(success=False, message="连接超时，请检查地址"))
+    except httpx.HTTPStatusError as e:
+        return ApiResponse(data=AiTestResponse(success=False, message=f"API 错误: {e.response.status_code}"))
+    except Exception as e:
+        return ApiResponse(data=AiTestResponse(success=False, message=f"连接失败: {str(e)[:100]}"))
+
+
+@router.post("/ai-test-credentials", response_model=ApiResponse[AiTestResponse])
+async def test_ai_credentials(data: AiTestCredentialsRequest):
+    """Test AI connection with provided credentials (before saving)."""
+    import httpx
+
+    base_url = data.ai_base_url.rstrip("/")
+    url = f"{base_url}/chat/completions"
+    headers = {"Authorization": f"Bearer {data.ai_api_key}", "Content-Type": "application/json"}
+    payload = {
+        "model": data.ai_model,
+        "messages": [
+            {"role": "system", "content": "只回复单词 OK，不要回复任何其他内容。"},
+            {"role": "user", "content": "hi"},
+        ],
+        "max_tokens": 5,
+        "temperature": 0,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+        resp_data = resp.json()
+        reply = _extract_reply(resp_data)
+        if reply:
+            message = f"连接成功！模型回复: {reply[:50]}"
+        else:
+            message = "连接成功！API 响应正常（模型未返回文本内容）"
+        return ApiResponse(data=AiTestResponse(success=True, message=message))
     except httpx.TimeoutException:
         return ApiResponse(data=AiTestResponse(success=False, message="连接超时，请检查地址"))
     except httpx.HTTPStatusError as e:

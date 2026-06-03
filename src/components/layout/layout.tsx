@@ -6,7 +6,7 @@ import { Footer } from "./footer"
 // Routes that should not show header/footer
 const FULLSCREEN_ROUTES = ['/login']
 // Routes that should not show footer
-const NO_FOOTER_ROUTES = ['/profile', '/change-password']
+const NO_FOOTER_ROUTES = ['/profile']
 
 export function Layout() {
   const location = useLocation()
