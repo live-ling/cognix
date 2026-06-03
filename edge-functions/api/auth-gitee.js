@@ -32,7 +32,7 @@ export default async function onRequest(context) {
         ['client_id', GITEE_CLIENT_ID],
         ['client_secret', GITEE_CLIENT_SECRET],
         ['redirect_uri', redirect_uri || ''],
-      ]),
+      ]).toString(),
     });
     if (!tokenResp.ok) throw new Error(`Gitee token error: ${await tokenResp.text()}`);
     const tokenData = await tokenResp.json();
