@@ -214,17 +214,32 @@ export function Profile() {
     setAiTestResult(null);
     setAiTestPassed(false);
     try {
-      const res = await fetch('/api/ai-test', {
+      const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
+      const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ai_api_key: aiKey.trim(), ai_base_url: baseUrl, ai_model: aiModel.trim() }),
+        headers: { 'Authorization': `Bearer ${aiKey.trim()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: aiModel.trim(),
+          messages: [
+            { role: 'system', content: '只回复单词 OK，不要回复任何其他内容。' },
+            { role: 'user', content: 'hi' },
+          ],
+          max_tokens: 5,
+          temperature: 0,
+        }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setAiTestResult(data);
-      if (data?.success) setAiTestPassed(true);
+      if (!res.ok) {
+        const txt = await res.text();
+        setAiTestResult({ success: false, message: `API 错误: ${res.status} ${txt.slice(0, 100)}` });
+      } else {
+        const data = await res.json();
+        const msg = data?.choices?.[0]?.message || {};
+        const reply = msg?.content || msg?.reasoning_content || '';
+        setAiTestResult({ success: true, message: reply ? `连接成功！模型回复: ${reply.slice(0, 50)}` : '连接成功！API 响应正常' });
+        setAiTestPassed(true);
+      }
     } catch (err: any) {
-      setAiTestResult({ success: false, message: err.message || '测试失败' });
+      setAiTestResult({ success: false, message: `连接失败: ${err.message.slice(0, 100)}` });
     } finally { setAiTesting(false); }
   };
 

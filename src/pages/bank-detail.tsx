@@ -26,6 +26,25 @@ const typeMap: Record<string, string> = {
   judgement: '判断',
 };
 
+const SYSTEM_PROMPT = `你是一个专业的题目解析助手。你需要将文本中的所有题目转换为统一的 JSON 格式。规则：
+- type 只能是 "single"、"multiple"、"judgement"
+- single 的 answers 如 ["A"]，multiple 如 ["A","C"]，judgement 如 ["正确"]
+- judgement 的 options 必须是 ["正确", "错误"]
+- options 格式为 "A. xxx"、"B. xxx"
+- 已有题目提取全部，题型与原文一致，答案以原文为准
+- 只返回 JSON 数组，不要其他文字`;
+
+function parseAIJson(content: string): any[] {
+  content = content.trim();
+  if (content.startsWith('```')) {
+    content = content.split('\n').filter(l => !l.trim().startsWith('```')).join('\n').trim();
+  }
+  try { const r = JSON.parse(content); return Array.isArray(r) ? r : (r?.questions || []); } catch {}
+  const s = content.indexOf('['), e = content.lastIndexOf(']');
+  if (s !== -1 && e !== -1) { try { return JSON.parse(content.slice(s, e + 1)); } catch {} }
+  return [];
+}
+
 export function BankDetail() {
   const { id } = useParams<{ id: string }>();
   const { user } = useSupabaseAuth();
@@ -122,28 +141,41 @@ export function BankDetail() {
   };
 
   const doGenerate = async (fileText?: string) => {
-    if (!id) return;
+    if (!id || !user?.ai_api_key) {
+      setImportError('请先在个人主页配置 AI 设置');
+      return;
+    }
     setGenerating(true);
     setImportError('');
     try {
       const isQuestionsMode = importMode === 'questions';
       const text = fileText || pasteText.trim();
-      const body: any = {
-        text,
-        ...(user && { ai_api_key: user.ai_api_key || '', ai_base_url: user.ai_base_url || '', ai_model: user.ai_model || '' }),
-        count: isQuestionsMode ? 50 : (materialCounts.single + materialCounts.multiple + materialCounts.judgement),
-        question_types: ['single', 'multiple', 'judgement'],
-      };
-      if (!isQuestionsMode) {
-        body.material_mode = true;
-        body.single_count = materialCounts.single;
-        body.multiple_count = materialCounts.multiple;
-        body.judgement_count = materialCounts.judgement;
+      let userPrompt: string;
+      if (isQuestionsMode) {
+        userPrompt = `请仔细阅读以下文本，提取其中**所有题目**并转换为标准格式。\n要求：\n- 题型必须与原文一致（单选题→single，多选题→multiple，判断题→judgement）\n- 答案必须与原文标注的一致\n\n文本内容：\n${text}`;
+      } else {
+        userPrompt = `请根据以下学习材料内容生成题目。\n具体要求：\n- 单选题：${materialCounts.single} 道\n- 多选题：${materialCounts.multiple} 道\n- 判断题：${materialCounts.judgement} 道\n\n文本内容：\n${text}`;
       }
-      const res = await fetch('/api/ai-generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const resp = await res.json();
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setGeneratedQuestions(resp?.questions || []);
+
+      const baseUrl = (user.ai_base_url || 'https://api.openai.com/v1').replace(/\/$/, '');
+      const res = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${user.ai_api_key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: user.ai_model || 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0.7,
+          max_tokens: 8000,
+        }),
+      });
+      if (!res.ok) throw new Error(`AI API 错误: ${res.status}`);
+      const data = await res.json();
+      const content = data?.choices?.[0]?.message?.content || '';
+      const questions = parseAIJson(content);
+      setGeneratedQuestions(questions);
       setImportStep('review');
     } catch (err: any) {
       setImportError(err.message || '生成失败');
