@@ -39,10 +39,20 @@ function parseAIJson(content: string): any[] {
   if (content.startsWith('```')) {
     content = content.split('\n').filter(l => !l.trim().startsWith('```')).join('\n').trim();
   }
-  try { const r = JSON.parse(content); return Array.isArray(r) ? r : (r?.questions || []); } catch {}
-  const s = content.indexOf('['), e = content.lastIndexOf(']');
-  if (s !== -1 && e !== -1) { try { return JSON.parse(content.slice(s, e + 1)); } catch {} }
-  return [];
+  let arr: any[] = [];
+  try { const r = JSON.parse(content); arr = Array.isArray(r) ? r : (r?.questions || []); } catch {
+    const s = content.indexOf('['), e = content.lastIndexOf(']');
+    if (s !== -1 && e !== -1) { try { arr = JSON.parse(content.slice(s, e + 1)); } catch {} }
+  }
+  // Normalize field names (AI may return "question" instead of "stem")
+  return arr.map((q: any) => ({
+    stem: q.stem || q.question || '',
+    type: q.type || 'single',
+    options: q.options || [],
+    answers: q.answers || [],
+    analysis: q.analysis || q.explanation || '',
+    difficulty: q.difficulty || 'medium',
+  }));
 }
 
 export function BankDetail() {
