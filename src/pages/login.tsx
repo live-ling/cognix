@@ -33,11 +33,14 @@ export function Login() {
 
     setOauthLoading('gitee');
     const exchangeGiteeCode = async () => {
-      const { data, error: fnErr } = await supabase.functions.invoke('auth-gitee', {
-        body: { code, redirect_uri: `${window.location.origin}/login` },
+      const res = await fetch('/api/auth-gitee', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, redirect_uri: `${window.location.origin}/login` }),
       });
-      if (fnErr || data?.error) {
-        setError(fnErr?.message || data?.error || 'Gitee 登录失败');
+      const data = await res.json();
+      if (!res.ok || data?.error) {
+        setError(data?.error || `HTTP ${res.status}` || 'Gitee 登录失败');
         setOauthLoading(null);
         // Clean URL
         window.history.replaceState({}, '', '/login');
