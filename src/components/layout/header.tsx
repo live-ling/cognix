@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils"
 import { Menu, X, Sun, Moon, User, LogOut, ChevronDown } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
 import { useTheme } from "@/contexts/ThemeContext"
-import { useAuth } from "@/contexts/AuthContext"
+import { useSupabaseAuth } from "@/contexts/SupabaseAuthContext"
 import { UserAvatar } from "@/components/user-avatar"
 
 const navLinks = [
@@ -24,7 +24,7 @@ export function Header() {
   const [scrolled, setScrolled] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const { theme, toggleTheme } = useTheme()
-  const { user, logout } = useAuth()
+  const { user, logout } = useSupabaseAuth()
   const userMenuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {

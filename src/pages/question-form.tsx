@@ -5,7 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
-import { api } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
+import { dbToQuestion, questionToDb } from '@/lib/question-utils';
 import type { Question, QuestionCreate } from '@/lib/types';
 
 const OPTION_LABELS = ['A', 'B', 'C', 'D', 'E', 'F'];
@@ -28,15 +29,17 @@ export function QuestionForm() {
   useEffect(() => {
     if (isEdit && bankId && qid) {
       setLoading(true);
-      api<Question>(`/banks/${bankId}/questions/${qid}`)
-        .then((q) => {
-          setStem(q.stem);
-          setType(q.type as 'single' | 'multiple' | 'judgement');
-          setOptions(q.options || ['', '']);
-          setAnswers(q.answers || []);
-          setAnalysis(q.analysis || '');
-          setDifficulty(q.difficulty);
-          setTags((q.tags || []).join(', '));
+      supabase.from('questions').select('*').eq('id', qid).single()
+        .then(({ data: q, error: err }) => {
+          if (err) { setError(err.message); return; }
+          const fq = dbToQuestion(q);
+          setStem(fq.stem);
+          setType(fq.type as 'single' | 'multiple' | 'judgement');
+          setOptions(fq.options || ['', '']);
+          setAnswers(fq.answers || []);
+          setAnalysis(fq.analysis || '');
+          setDifficulty(fq.difficulty);
+          setTags((fq.tags || []).join(', '));
         })
         .catch((err) => setError(err.message))
         .finally(() => setLoading(false));
@@ -90,23 +93,13 @@ export function QuestionForm() {
 
     setLoading(true);
     setError(null);
-    try {
-      if (isEdit) {
-        await api(`/banks/${bankId}/questions/${qid}`, {
-          method: 'PUT',
-          body: JSON.stringify(payload),
-        });
-      } else {
-        await api(`/banks/${bankId}/questions`, {
-          method: 'POST',
-          body: JSON.stringify(payload),
-        });
-      }
-      navigate(`/banks/${bankId}`);
-    } catch (err: any) {
-      setError(err.message);
-      setLoading(false);
-    }
+    const dbPayload = { ...questionToDb(payload), bank_id: bankId };
+    const { error: err } = isEdit
+      ? await supabase.from('questions').update(dbPayload).eq('id', qid)
+      : await supabase.from('questions').insert(dbPayload);
+    if (err) { setError(err.message); setLoading(false); return; }
+    navigate(`/banks/${bankId}`);
+    setLoading(false);
   };
 
   if (loading && isEdit) {

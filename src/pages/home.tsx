@@ -4,8 +4,8 @@ import { BookOpen, BarChart3, FileText, Target, Lightbulb, Brain, LogIn } from '
 import { EnhancedButton } from '@/components/ui/enhanced-button';
 import { ScrollReveal } from '@/components/ui/scroll-reveal';
 import { Card, CardDescription, CardTitle } from '@/components/ui/card';
-import { useAuth } from '@/contexts/AuthContext';
-import { api } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
+import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
 import { CacheManager } from '@/lib/cache';
 import type { DashboardStats } from '@/lib/types';
 
@@ -43,19 +43,19 @@ const features = [
 ];
 
 export function Home() {
-  const { user } = useAuth();
+  const { user } = useSupabaseAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
 
   useEffect(() => {
     if (!user) return;
     const cached = CacheManager.get<DashboardStats>('home_stats');
     if (cached) { setStats(cached); return; }
-    api<DashboardStats>('/stats/dashboard')
-      .then((data) => {
-        setStats(data);
-        CacheManager.set('home_stats', data, 5 * 60 * 1000);
-      })
-      .catch(() => {});
+    supabase.rpc('get_dashboard_stats').then(({ data, error }) => {
+        if (!error && data) {
+          setStats(data as DashboardStats);
+          CacheManager.set('home_stats', data, 5 * 60 * 1000);
+        }
+      });
   }, [user]);
 
   return (

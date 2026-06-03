@@ -5,7 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { api } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
+import { dbToBank } from '@/lib/question-utils';
 import type { Bank } from '@/lib/types';
 
 export function PracticeSetup() {

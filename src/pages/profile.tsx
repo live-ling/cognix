@@ -11,9 +11,9 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useAuth } from '@/contexts/AuthContext';
+import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
+import { supabase } from '@/lib/supabase';
 import { UserAvatar } from '@/components/user-avatar';
-import { api } from '@/lib/api';
 import { CacheManager } from '@/lib/cache';
 import type { DashboardStats } from '@/lib/types';
 
@@ -49,7 +49,7 @@ function Modal({ open, onClose, title, children }: {
 }
 
 export function Profile() {
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser } = useSupabaseAuth();
   const [stats, setStats] = useState<DashboardStats | null>(() => {
     return CacheManager.get<DashboardStats>('profile_stats');
   });
@@ -87,15 +87,14 @@ export function Profile() {
   const [aiTestResult, setAiTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [customBaseUrl, setCustomBaseUrl] = useState('');
 
-  const fetchStats = () => {
+  const fetchStats = async () => {
     setLoading(true);
-    api<DashboardStats>('/stats/dashboard')
-      .then((data) => {
-        setStats(data);
-        CacheManager.set('profile_stats', data, 10 * 60 * 1000);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    const { data, error } = await supabase.rpc('get_dashboard_stats');
+    if (!error && data) {
+      setStats(data as DashboardStats);
+      CacheManager.set('profile_stats', data, 10 * 60 * 1000);
+    }
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -113,28 +112,25 @@ export function Profile() {
 
   // ===== Profile save handlers =====
   const handleSaveName = async () => {
-    if (!editName.trim()) return;
+    if (!editName.trim() || !user) return;
     setSaving(true);
     setEditError('');
-    try {
-      await api('/auth/me', { method: 'PUT', body: JSON.stringify({ name: editName.trim() }) });
-      await refreshUser();
-      setEditingName(false);
-    } catch (err: any) {
-      setEditError(err.message || '保存失败');
-    } finally { setSaving(false); }
+    const { error } = await supabase.from('profiles').update({ name: editName.trim() }).eq('id', user.id);
+    if (error) { setEditError(error.message); setSaving(false); return; }
+    await refreshUser();
+    setEditingName(false);
+    setSaving(false);
   };
 
   const handleSaveBio = async () => {
+    if (!user) return;
     setSaving(true);
     setEditError('');
-    try {
-      await api('/auth/me', { method: 'PUT', body: JSON.stringify({ bio: editBio.trim() }) });
-      await refreshUser();
-      setEditingBio(false);
-    } catch (err: any) {
-      setEditError(err.message || '保存失败');
-    } finally { setSaving(false); }
+    const { error } = await supabase.from('profiles').update({ bio: editBio.trim() }).eq('id', user.id);
+    if (error) { setEditError(error.message); setSaving(false); return; }
+    await refreshUser();
+    setEditingBio(false);
+    setSaving(false);
   };
 
   // ===== Password handlers =====
@@ -155,15 +151,13 @@ export function Profile() {
     if (oldPassword === newPassword) { setPwdError('新密码不能与原密码相同'); return; }
 
     setPwdLoading(true);
-    try {
-      await api('/auth/change-password', {
-        method: 'POST',
-        body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
-      });
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) {
+      setPwdError(error.message === 'New password should be different from the old password.' ? '新密码不能与原密码相同' : error.message || '修改失败');
+    } else {
       setPwdSuccess(true);
-    } catch (err: any) {
-      setPwdError(err.message || '修改失败');
-    } finally { setPwdLoading(false); }
+    }
+    setPwdLoading(false);
   };
 
   // ===== AI provider presets =====
@@ -220,31 +214,31 @@ export function Profile() {
     setAiTestResult(null);
     setAiTestPassed(false);
     try {
-      const res = await api<{ success: boolean; message: string }>('/auth/ai-test-credentials', {
-        method: 'POST',
-        body: JSON.stringify({ ai_api_key: aiKey.trim(), ai_base_url: baseUrl, ai_model: aiModel.trim() }),
+      const { data, error } = await supabase.functions.invoke('ai-test', {
+        body: { ai_api_key: aiKey.trim(), ai_base_url: baseUrl, ai_model: aiModel.trim() },
       });
-      setAiTestResult(res);
-      if (res.success) setAiTestPassed(true);
+      if (error) throw new Error(error.message);
+      setAiTestResult(data);
+      if (data?.success) setAiTestPassed(true);
     } catch (err: any) {
       setAiTestResult({ success: false, message: err.message || '测试失败' });
     } finally { setAiTesting(false); }
   };
 
   const handleSaveAi = async () => {
+    if (!user) return;
     const baseUrl = getAiBaseUrl();
     setAiSaving(true);
     setAiError('');
-    try {
-      await api('/auth/ai-settings', {
-        method: 'PUT',
-        body: JSON.stringify({ ai_api_key: aiKey.trim(), ai_base_url: baseUrl, ai_model: aiModel.trim() }),
-      });
-      await refreshUser();
-      setAiModalOpen(false);
-    } catch (err: any) {
-      setAiError(err.message || '保存失败');
-    } finally { setAiSaving(false); }
+    const { error } = await supabase.from('profiles').update({
+      ai_api_key: aiKey.trim(),
+      ai_base_url: baseUrl,
+      ai_model: aiModel.trim(),
+    }).eq('id', user.id);
+    if (error) { setAiError(error.message); setAiSaving(false); return; }
+    await refreshUser();
+    setAiModalOpen(false);
+    setAiSaving(false);
   };
 
   if (!user) return null;

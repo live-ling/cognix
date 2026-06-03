@@ -9,8 +9,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { api, API_BASE } from '@/lib/api';
-import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
+import { dbToBank, dbToQuestion, questionToDb } from '@/lib/question-utils';
+import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
 import type { Bank, Question } from '@/lib/types';
 
 const difficultyMap: Record<string, string> = {
@@ -27,7 +28,7 @@ const typeMap: Record<string, string> = {
 
 export function BankDetail() {
   const { id } = useParams<{ id: string }>();
-  const { user } = useAuth();
+  const { user } = useSupabaseAuth();
   const [bank, setBank] = useState<Bank | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,34 +54,24 @@ export function BankDetail() {
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const fetchData = () => {
+  const fetchData = async () => {
     if (!id) return;
     setLoading(true);
     setError(null);
-    Promise.all([
-      api<Bank>(`/banks/${id}`),
-      api<any>(`/banks/${id}/questions`),
-    ])
-      .then(([bankData, questionsData]) => {
-        setBank(bankData);
-        const qs = Array.isArray(questionsData) ? questionsData : (questionsData?.questions ?? questionsData?.items ?? []);
-        setQuestions(qs);
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+    const { data: bankData } = await supabase.from('banks').select('*').eq('id', id).single();
+    const { data: questionsData } = await supabase.from('questions').select('*').eq('bank_id', id).order('created_at', { ascending: true });
+    if (bankData) setBank(dbToBank(bankData));
+    setQuestions((questionsData || []).map(dbToQuestion));
+    setLoading(false);
   };
 
   useEffect(() => { fetchData(); }, [id]);
 
   const handleDelete = async () => {
     if (!deleteId) return;
-    try {
-      await api(`/banks/${id}/questions/${deleteId}`, { method: 'DELETE' });
-      setDeleteId(null);
-      fetchData();
-    } catch (err: any) {
-      alert(err.message);
-    }
+    const { error } = await supabase.from('questions').delete().eq('id', deleteId);
+    if (error) alert(error.message);
+    else { setDeleteId(null); fetchData(); }
   };
 
   // AI Import handlers
@@ -104,31 +95,18 @@ export function BankDetail() {
   const handleUpload = async (file: File, isQuestionsMode: boolean) => {
     setUploading(true);
     setImportError('');
-    const formData = new FormData();
-    formData.append('file', file);
     try {
-      const token = localStorage.getItem('cognix_token');
-      const res = await fetch(`${API_BASE}/import/upload`, {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: formData,
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.detail || '上传失败');
-      if (!json.success) throw new Error(json.error || '上传失败');
-      const uploadData = json.data;
-      setUploadResult(uploadData);
+      const text = await file.text();
+      setUploadResult({ file_id: '', filename: file.name, preview: text.slice(0, 500), char_count: text.length });
+      setPasteText(text);
       setUploading(false);
-
       if (isQuestionsMode) {
-        // Questions mode: generate directly from uploaded file
-        await doGenerate(uploadData.file_id);
+        doGenerate(text);
       } else {
-        // Material mode: go to configure
         setImportStep('configure');
       }
     } catch (err: any) {
-      setImportError(err.message || '上传失败');
+      setImportError(err.message || '读取文件失败');
       setUploading(false);
     }
   };
@@ -143,16 +121,18 @@ export function BankDetail() {
     }
   };
 
-  const doGenerate = async (fileId?: string) => {
+  const doGenerate = async (fileText?: string) => {
     if (!id) return;
     setGenerating(true);
     setImportError('');
     try {
       const isQuestionsMode = importMode === 'questions';
+      const text = fileText || pasteText.trim();
       const body: any = {
-        bank_id: id,
+        text,
+        ...(user && { ai_api_key: user.ai_api_key || '', ai_base_url: user.ai_base_url || '', ai_model: user.ai_model || '' }),
         count: isQuestionsMode ? 50 : (materialCounts.single + materialCounts.multiple + materialCounts.judgement),
-        question_types: isQuestionsMode ? ['single', 'multiple', 'judgement'] : ['single', 'multiple', 'judgement'],
+        question_types: ['single', 'multiple', 'judgement'],
       };
       if (!isQuestionsMode) {
         body.material_mode = true;
@@ -160,16 +140,9 @@ export function BankDetail() {
         body.multiple_count = materialCounts.multiple;
         body.judgement_count = materialCounts.judgement;
       }
-      if (fileId || uploadResult) {
-        body.file_id = fileId || uploadResult!.file_id;
-      } else {
-        body.text = pasteText.trim();
-      }
-      const data = await api<{ questions: any[] }>('/import/generate', {
-        method: 'POST',
-        body: JSON.stringify(body),
-      });
-      setGeneratedQuestions(data.questions || []);
+      const { data: resp, error: fnErr } = await supabase.functions.invoke('ai-generate', { body });
+      if (fnErr) throw new Error(fnErr.message);
+      setGeneratedQuestions(resp?.questions || []);
       setImportStep('review');
     } catch (err: any) {
       setImportError(err.message || '生成失败');
@@ -182,22 +155,16 @@ export function BankDetail() {
     if (!id || generatedQuestions.length === 0) return;
     setSaving(true);
     setImportError('');
-    try {
-      const data = await api<{ created_count: number }>('/import/save', {
-        method: 'POST',
-        body: JSON.stringify({
-          bank_id: id,
-          questions: generatedQuestions,
-        }),
-      });
-      setImportResult(data);
-      setImportStep('result');
-      fetchData();
-    } catch (err: any) {
-      setImportError(err.message || '保存失败');
-    } finally {
-      setSaving(false);
-    }
+    const rows = generatedQuestions.map((q: any) => ({
+      bank_id: id,
+      ...questionToDb(q),
+    }));
+    const { error } = await supabase.from('questions').insert(rows);
+    if (error) { setImportError(error.message); setSaving(false); return; }
+    setImportResult({ created_count: rows.length });
+    setImportStep('result');
+    fetchData();
+    setSaving(false);
   };
 
   const updateQuestion = (index: number, field: string, value: any) => {

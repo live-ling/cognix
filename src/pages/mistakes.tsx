@@ -5,7 +5,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { api } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
 import type { Mistake, Bank } from '@/lib/types';
 
 export function Mistakes() {
@@ -22,46 +22,33 @@ export function Mistakes() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchLoading, setBatchLoading] = useState(false);
 
-  const fetchData = () => {
+  const fetchData = async () => {
     setLoading(true);
     setError(null);
     setSelectedIds(new Set());
-    const params = new URLSearchParams();
-    if (filterBank) params.set('bank_id', filterBank);
-    if (filterMastered) params.set('is_mastered', filterMastered);
-
-    Promise.all([
-      api<any>(`/mistakes?${params.toString()}`),
-      api<any>('/banks'),
-    ])
-      .then(([m, b]) => {
-        const mistakeList = Array.isArray(m) ? m : (m?.items ?? m?.mistakes ?? []);
-        const bankList = Array.isArray(b) ? b : (b?.items ?? b?.banks ?? []);
-        setMistakes(Array.isArray(mistakeList) ? mistakeList : []);
-        setBanks(Array.isArray(bankList) ? bankList : []);
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+    let query = supabase.from('mistakes').select('*, question:questions(*, bank:banks(*))').order('last_wrong_at', { ascending: false });
+    if (filterBank) query = query.eq('question.bank_id', filterBank);
+    if (filterMastered === 'true') query = query.eq('is_mastered', true);
+    else if (filterMastered === 'false') query = query.eq('is_mastered', false);
+    const [{ data: m, error: err1 }, { data: b, error: err2 }] = await Promise.all([query, supabase.from('banks').select('*').order('created_at', { ascending: false })]);
+    if (err1) setError(err1.message);
+    setMistakes((m || []) as Mistake[]);
+    setBanks((b || []) as Bank[]);
+    setLoading(false);
   };
 
   useEffect(() => { fetchData(); }, [filterBank, filterMastered]);
 
   const handleDelete = async (id: string) => {
-    try {
-      await api(`/mistakes/${id}`, { method: 'DELETE' });
-      fetchData();
-    } catch (err: any) {
-      alert(err.message);
-    }
+    const { error } = await supabase.from('mistakes').delete().eq('id', id);
+    if (error) alert(error.message);
+    else fetchData();
   };
 
   const handleMarkMastered = async (id: string) => {
-    try {
-      await api(`/mistakes/${id}/master`, { method: 'POST' });
-      fetchData();
-    } catch (err: any) {
-      alert(err.message);
-    }
+    const { error } = await supabase.from('mistakes').update({ is_mastered: true, consecutive_correct: 3 }).eq('id', id);
+    if (error) alert(error.message);
+    else fetchData();
   };
 
   // Batch selection helpers
@@ -87,10 +74,7 @@ export function Mistakes() {
     if (!confirm(`确定删除选中的 ${selectedIds.size} 条错题记录？`)) return;
     setBatchLoading(true);
     try {
-      await api('/mistakes/batch/delete', {
-        method: 'POST',
-        body: JSON.stringify({ ids: Array.from(selectedIds) }),
-      });
+      await supabase.from('mistakes').delete().in('id', Array.from(selectedIds));
       fetchData();
     } catch (err: any) {
       alert(err.message);
@@ -103,10 +87,7 @@ export function Mistakes() {
     if (selectedIds.size === 0) return;
     setBatchLoading(true);
     try {
-      await api('/mistakes/batch/master', {
-        method: 'POST',
-        body: JSON.stringify({ ids: Array.from(selectedIds) }),
-      });
+      await supabase.from('mistakes').update({ is_mastered: true, consecutive_correct: 3 }).in('id', Array.from(selectedIds));
       fetchData();
     } catch (err: any) {
       alert(err.message);

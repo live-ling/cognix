@@ -5,7 +5,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faGithub } from '@fortawesome/free-brands-svg-icons';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useAuth } from '@/contexts/AuthContext';
+import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
 import { UserAvatar } from '@/components/user-avatar';
 import { getCookie, setCookie, removeCookie } from '@/lib/cookies';
 
@@ -16,7 +16,7 @@ const REMEMBER_ME_FLAG = 'cognix_remember_me';
 const REMEMBER_PWD_FLAG = 'cognix_remember_pwd';
 
 export function Login() {
-  const { user, login, register } = useAuth();
+  const { user, login, register } = useSupabaseAuth();
   const navigate = useNavigate();
   const [isRegister, setIsRegister] = useState(false);
   const [loading, setLoading] = useState(false);

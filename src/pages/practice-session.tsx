@@ -4,7 +4,7 @@ import { CheckCircle, XCircle, Clock, ArrowRight, RotateCcw, BookOpen } from 'lu
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { api } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
 import type { PracticeQuestion, PracticeSubmitResponse } from '@/lib/types';
 import { QuestionCard } from '@/components/ui/question-card';
 

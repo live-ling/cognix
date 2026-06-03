@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { api } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
+import { dbToBank } from '@/lib/question-utils';
 import type { Bank } from '@/lib/types';
 
 export function BankList() {
@@ -19,20 +20,16 @@ export function BankList() {
   const [createDesc, setCreateDesc] = useState('');
   const [creating, setCreating] = useState(false);
 
-  const fetchBanks = () => {
-    const params = new URLSearchParams();
-    if (search.trim()) params.set('search', search.trim());
-    const qs = params.toString();
+  const fetchBanks = async () => {
     setLoading(true);
     setError(null);
-    api<any>(`/banks${qs ? `?${qs}` : ''}`)
-      .then((data) => {
-        // 兼容不同后端返回格式：数组 / { items } / { banks }
-        const list = Array.isArray(data) ? data : (data?.items ?? data?.banks ?? []);
-        setBanks(list);
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+    let query = supabase.from('banks').select('*, questions(count)').order('created_at', { ascending: false });
+    if (search.trim()) query = query.ilike('title', `%${search.trim()}%`);
+    const { data, error: err } = await query;
+    if (err) { setError(err.message); setLoading(false); return; }
+    const list = (data || []).map((row: any) => dbToBank({ ...row, question_count: row.questions?.[0]?.count || 0 }));
+    setBanks(list);
+    setLoading(false);
   };
 
   useEffect(() => { fetchBanks(); }, []);
@@ -46,18 +43,13 @@ export function BankList() {
     e.preventDefault();
     if (!createName.trim()) return;
     setCreating(true);
-    try {
-      await api('/banks', {
-        method: 'POST',
-        body: JSON.stringify({ name: createName.trim(), description: createDesc.trim() }),
-      });
-      setShowCreate(false);
-      setCreateName('');
-      setCreateDesc('');
-      fetchBanks();
-    } catch (err: any) {
-      alert(err.message);
-    } finally {
+    const { error: err } = await supabase.from('banks').insert({ title: createName.trim(), description: createDesc.trim() });
+    if (err) { alert(err.message); setCreating(false); return; }
+    setShowCreate(false);
+    setCreateName('');
+    setCreateDesc('');
+    fetchBanks();
+    setCreating(false);
       setCreating(false);
     }
   };
