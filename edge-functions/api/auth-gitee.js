@@ -18,10 +18,10 @@ export default async function onRequest(context) {
     const { code, redirect_uri } = body;
     if (!code) throw new Error('Missing code');
 
-    const GITEE_CLIENT_ID = context.env.GITEE_CLIENT_ID || body.client_id || '';
-    const GITEE_CLIENT_SECRET = context.env.GITEE_CLIENT_SECRET || '';
-    const SUPABASE_URL = context.env.SUPABASE_URL || 'https://bbiwowuwlrneivycdqkf.supabase.co';
-    const SERVICE_ROLE_KEY = context.env.SUPABASE_SERVICE_ROLE_KEY;
+    const GITEE_CLIENT_ID = body.client_id || context.env.VITE_GITEE_CLIENT_ID || '';
+    const GITEE_CLIENT_SECRET = context.env.VITE_GITEE_CLIENT_SECRET || '';
+    const SUPABASE_URL = context.env.VITE_SUPABASE_URL || 'https://bbiwowuwlrneivycdqkf.supabase.co';
+    const SERVICE_ROLE_KEY = context.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
     // 1. Exchange code for Gitee access token
     const tokenResp = await fetch('https://gitee.com/oauth/token', {
