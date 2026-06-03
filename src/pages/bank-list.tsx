@@ -50,8 +50,6 @@ export function BankList() {
     setCreateDesc('');
     fetchBanks();
     setCreating(false);
-      setCreating(false);
-    }
   };
 
   return (
