@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 
 import { supabase } from '@/lib/supabase';
 import { dbToQuestion, questionToDb } from '@/lib/question-utils';
-import type { Question, QuestionCreate } from '@/lib/types';
+import type { QuestionCreate } from '@/lib/types';
 
 const OPTION_LABELS = ['A', 'B', 'C', 'D', 'E', 'F'];
 
@@ -29,20 +29,19 @@ export function QuestionForm() {
   useEffect(() => {
     if (isEdit && bankId && qid) {
       setLoading(true);
-      supabase.from('questions').select('*').eq('id', qid).single()
-        .then(({ data: q, error: err }) => {
-          if (err) { setError(err.message); return; }
-          const fq = dbToQuestion(q);
-          setStem(fq.stem);
-          setType(fq.type as 'single' | 'multiple' | 'judgement');
-          setOptions(fq.options || ['', '']);
-          setAnswers(fq.answers || []);
-          setAnalysis(fq.analysis || '');
-          setDifficulty(fq.difficulty);
-          setTags((fq.tags || []).join(', '));
-        })
-        .catch((err) => setError(err.message))
-        .finally(() => setLoading(false));
+      (async () => {
+        const { data: q, error: err } = await supabase.from('questions').select('*').eq('id', qid).single();
+        if (err) { setError(err.message); setLoading(false); return; }
+        const fq = dbToQuestion(q);
+        setStem(fq.stem);
+        setType(fq.type as 'single' | 'multiple' | 'judgement');
+        setOptions(fq.options || ['', '']);
+        setAnswers(fq.answers || []);
+        setAnalysis(fq.analysis || '');
+        setDifficulty(fq.difficulty);
+        setTags((fq.tags || []).join(', '));
+        setLoading(false);
+      })();
     }
   }, [isEdit, bankId, qid]);
 

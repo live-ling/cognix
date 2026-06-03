@@ -30,7 +30,7 @@ export function Mistakes() {
     if (filterBank) query = query.eq('question.bank_id', filterBank);
     if (filterMastered === 'true') query = query.eq('is_mastered', true);
     else if (filterMastered === 'false') query = query.eq('is_mastered', false);
-    const [{ data: m, error: err1 }, { data: b, error: err2 }] = await Promise.all([query, supabase.from('banks').select('*').order('created_at', { ascending: false })]);
+    const [{ data: m, error: err1 }, { data: b }] = await Promise.all([query, supabase.from('banks').select('*').order('created_at', { ascending: false })]);
     if (err1) setError(err1.message);
     setMistakes((m || []) as Mistake[]);
     setBanks((b || []) as Bank[]);

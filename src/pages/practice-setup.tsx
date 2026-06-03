@@ -25,9 +25,10 @@ export function PracticeSetup() {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    api<any>('/banks')
-      .then((data) => {
-        const list = Array.isArray(data) ? data : (data?.items ?? data?.banks ?? []);
+    supabase.from('banks').select('*, questions(count)').order('created_at', { ascending: false })
+      .then(({ data, error: err }) => {
+        if (err) { setError(err.message); return; }
+        const list = (data || []).map((row: any) => dbToBank({ ...row, question_count: row.questions?.[0]?.count || 0 }));
         setBanks(list);
         if (preSelectedBankId && list.find((b: Bank) => b.id === preSelectedBankId)) {
           setSelectedBank(preSelectedBankId);
@@ -35,7 +36,6 @@ export function PracticeSetup() {
           setSelectedBank(list[0].id);
         }
       })
-      .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [preSelectedBankId]);
 
@@ -43,20 +43,33 @@ export function PracticeSetup() {
     if (!selectedBank) return;
     setStarting(true);
     setError(null);
-    try {
-      const data = await api<any>('/practice/start', {
-        method: 'POST',
-        body: JSON.stringify({
-          bank_id: selectedBank,
-          mode,
-          count,
-        }),
-      });
-      navigate('/practice/session', { state: { ...data, bankId: selectedBank } });
-    } catch (err: any) {
-      setError(err.message);
-      setStarting(false);
-    }
+    // Fetch questions for practice
+    const { data: questions, error: qErr } = await supabase
+      .from('questions')
+      .select('id, type, content, options')
+      .eq('bank_id', selectedBank)
+      .limit(count);
+    if (qErr) { setError(qErr.message); setStarting(false); return; }
+    // Create practice session
+    const { data: session, error: sErr } = await supabase
+      .from('practice_sessions')
+      .insert({ bank_id: selectedBank, mode, total_count: questions?.length || 0 })
+      .select('id')
+      .single();
+    if (sErr) { setError(sErr.message); setStarting(false); return; }
+    navigate('/practice/session', {
+      state: {
+        session_id: session.id,
+        questions: (questions || []).map((q: any, i: number) => ({
+          id: q.id,
+          type: q.type === 'SINGLE' ? 'single' : q.type === 'MULTIPLE' ? 'multiple' : 'judgement',
+          stem: q.content,
+          options: q.options,
+          order_index: i,
+        })),
+        bankId: selectedBank,
+      },
+    });
   };
 
   const modes = [

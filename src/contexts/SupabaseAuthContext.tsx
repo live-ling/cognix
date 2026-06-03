@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
-import type { User, Session } from '@supabase/supabase-js';
+import type { Session } from '@supabase/supabase-js';
 import { CacheManager } from '@/lib/cache';
 
 export interface AppUser {
@@ -9,6 +9,7 @@ export interface AppUser {
   email: string;
   bio: string;
   ai_configured: boolean;
+  ai_api_key: string;
   ai_base_url: string;
   ai_model: string;
   created_at: string;
@@ -40,6 +41,7 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       email: s.user.email || '',
       bio: p.bio || '',
       ai_configured: !!p.ai_api_key,
+      ai_api_key: p.ai_api_key || '',
       ai_base_url: p.ai_base_url || '',
       ai_model: p.ai_model || '',
       created_at: s.user.created_at || '',

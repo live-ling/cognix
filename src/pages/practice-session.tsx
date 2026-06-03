@@ -82,16 +82,53 @@ export function PracticeSession() {
     if (!currentQuestion || selectedAnswers.length === 0) return;
     setLoading(true);
     try {
-      const data = await api<PracticeSubmitResponse>('/practice/submit', {
-        method: 'POST',
-        body: JSON.stringify({
-          session_id: state!.session_id,
-          question_id: currentQuestion.id,
-          answers: selectedAnswers,
-          time_spent: questionTimer,
-        }),
+      // Get correct answer from DB
+      const { data: question } = await supabase
+        .from('questions').select('answer, explanation').eq('id', currentQuestion.id).single();
+      if (!question) throw new Error('题目不存在');
+
+      const qtype = currentQuestion.type;
+      let userAnswer: string;
+      if (qtype === 'multiple') {
+        userAnswer = selectedAnswers.sort().join('');
+      } else if (qtype === 'judgement') {
+        userAnswer = selectedAnswers[0] === 'A' ? '正确' : '错误';
+      } else {
+        userAnswer = selectedAnswers[0];
+      }
+      const isCorrect = userAnswer === question.answer;
+
+      // Save practice detail
+      await supabase.from('practice_details').insert({
+        session_id: state!.session_id,
+        question_id: currentQuestion.id,
+        user_answer: userAnswer,
+        is_correct: isCorrect,
+        time_spent: questionTimer,
+        order_index: currentIndex,
       });
-      setResult(data);
+
+      // Track mistakes
+      if (!isCorrect) {
+        const { data: existing } = await supabase.from('mistakes').select('id, wrong_count').eq('question_id', currentQuestion.id).maybeSingle();
+        if (existing) {
+          await supabase.from('mistakes').update({ wrong_count: (existing.wrong_count || 1) + 1, consecutive_correct: 0, is_mastered: false, last_wrong_at: new Date().toISOString() }).eq('id', existing.id);
+        } else {
+          await supabase.from('mistakes').insert({ question_id: currentQuestion.id, wrong_count: 1 });
+        }
+      } else {
+        const { data: existing } = await supabase.from('mistakes').select('id, consecutive_correct').eq('question_id', currentQuestion.id).maybeSingle();
+        if (existing) {
+          const newCC = (existing.consecutive_correct || 0) + 1;
+          await supabase.from('mistakes').update({ consecutive_correct: newCC, is_mastered: newCC >= 3 }).eq('id', existing.id);
+        }
+      }
+
+      setResult({
+        is_correct: isCorrect,
+        correct_answers: qtype === 'multiple' ? question.answer.split('') : [question.answer],
+        explanation: question.explanation,
+      });
       setSubmitted(true);
     } catch (err: any) {
       alert(err.message);
@@ -102,14 +139,50 @@ export function PracticeSession() {
 
   const handleNext = async () => {
     if (isLast) {
-      // Finish session
       setLoading(true);
       try {
-        const data = await api<any>('/practice/finish', {
-          method: 'POST',
-          body: JSON.stringify({ session_id: state!.session_id }),
+        // Count correct answers
+        const { count } = await supabase
+          .from('practice_details')
+          .select('*', { count: 'exact', head: true })
+          .eq('session_id', state!.session_id)
+          .eq('is_correct', true);
+
+        // Update session
+        await supabase.from('practice_sessions').update({
+          correct_count: count || 0,
+          time_spent: totalTimer,
+          is_completed: true,
+          finished_at: new Date().toISOString(),
+        }).eq('id', state!.session_id);
+
+        // Update learning log
+        const today = new Date().toISOString().slice(0, 10);
+        const { data: log } = await supabase.from('learning_logs').select('*').eq('date', today).maybeSingle();
+        if (log) {
+          await supabase.from('learning_logs').update({ count: log.count + questions.length, correct: log.correct + (count || 0) }).eq('id', log.id);
+        } else {
+          await supabase.from('learning_logs').insert({ date: today, count: questions.length, correct: count || 0 });
+        }
+
+        // Get details
+        const { data: details } = await supabase
+          .from('practice_details')
+          .select('*, question:questions(content, answer)')
+          .eq('session_id', state!.session_id)
+          .order('order_index');
+
+        setFinishData({
+          detail: {
+            total: questions.length,
+            correct: count || 0,
+            questions: (details || []).map((d: any) => ({
+              stem: d.question?.content || '',
+              user_answer: d.user_answer,
+              is_correct: d.is_correct,
+            })),
+          },
         });
-        setFinishData(data);
         setFinished(true);
       } catch (err: any) {
         alert(err.message);
