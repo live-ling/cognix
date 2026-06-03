@@ -214,10 +214,13 @@ export function Profile() {
     setAiTestResult(null);
     setAiTestPassed(false);
     try {
-      const { data, error } = await supabase.functions.invoke('ai-test', {
-        body: { ai_api_key: aiKey.trim(), ai_base_url: baseUrl, ai_model: aiModel.trim() },
+      const res = await fetch('/api/ai-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ai_api_key: aiKey.trim(), ai_base_url: baseUrl, ai_model: aiModel.trim() }),
       });
-      if (error) throw new Error(error.message);
+      const data = await res.json();
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setAiTestResult(data);
       if (data?.success) setAiTestPassed(true);
     } catch (err: any) {

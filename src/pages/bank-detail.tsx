@@ -140,8 +140,9 @@ export function BankDetail() {
         body.multiple_count = materialCounts.multiple;
         body.judgement_count = materialCounts.judgement;
       }
-      const { data: resp, error: fnErr } = await supabase.functions.invoke('ai-generate', { body });
-      if (fnErr) throw new Error(fnErr.message);
+      const res = await fetch('/api/ai-generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const resp = await res.json();
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setGeneratedQuestions(resp?.questions || []);
       setImportStep('review');
     } catch (err: any) {
