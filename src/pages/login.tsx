@@ -5,6 +5,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faGithub } from '@fortawesome/free-brands-svg-icons';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { supabase } from '@/lib/supabase';
 import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
 import { UserAvatar } from '@/components/user-avatar';
 import { getCookie, setCookie, removeCookie } from '@/lib/cookies';
@@ -22,6 +23,7 @@ export function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState<string | null>(null); // tracks which OAuth provider is loading
 
   const [rememberMe, setRememberMe] = useState(() => {
     return getCookie(REMEMBER_ME_FLAG) === 'true';
@@ -46,6 +48,21 @@ export function Login() {
   const [email, setEmail] = useState(isPreLogin ? savedEmail : '');
   const [password, setPassword] = useState(isPreLogin ? savedPassword : '');
   const [confirmPassword, setConfirmPassword] = useState('');
+
+  const handleOAuthLogin = async (provider: 'github' | 'gitee') => {
+    setOauthLoading(provider);
+    setError('');
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: `${window.location.origin}/profile`,
+      },
+    });
+    if (oauthError) {
+      setError(oauthError.message);
+      setOauthLoading(null);
+    }
+  };
 
   // Redirect if already logged in
   if (user) {
@@ -405,19 +422,31 @@ export function Login() {
               <div className="flex items-center justify-center gap-3 mt-4">
                 <button
                   type="button"
-                  className="w-10 h-10 rounded-full border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
+                  className="w-10 h-10 rounded-full border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors disabled:opacity-50"
                   title="Gitee 登录"
+                  onClick={() => handleOAuthLogin('gitee')}
+                  disabled={oauthLoading !== null}
                 >
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M11.984 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.016 0zm6.09 5.333c.328 0 .593.266.593.593v3.633h3.633a.593.593 0 0 1 0 1.186h-3.633v3.633a.593.593 0 0 1-1.186 0v-3.633h-3.633a.593.593 0 0 1 0-1.186h3.633V5.926c0-.327.266-.593.593-.593zM5.333 10.667a6.667 6.667 0 0 1 13.334 0v.44H5.333v-.44zm0 1.777h13.334v.44a6.667 6.667 0 0 1-13.334 0v-.44z"/>
-                  </svg>
+                  {oauthLoading === 'gitee' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M11.984 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.016 0zm6.09 5.333c.328 0 .593.266.593.593v3.633h3.633a.593.593 0 0 1 0 1.186h-3.633v3.633a.593.593 0 0 1-1.186 0v-3.633h-3.633a.593.593 0 0 1 0-1.186h3.633V5.926c0-.327.266-.593.593-.593zM5.333 10.667a6.667 6.667 0 0 1 13.334 0v.44H5.333v-.44zm0 1.777h13.334v.44a6.667 6.667 0 0 1-13.334 0v-.44z"/>
+                    </svg>
+                  )}
                 </button>
                 <button
                   type="button"
-                  className="w-10 h-10 rounded-full border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
+                  className="w-10 h-10 rounded-full border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors disabled:opacity-50"
                   title="GitHub 登录"
+                  onClick={() => handleOAuthLogin('github')}
+                  disabled={oauthLoading !== null}
                 >
-                  <FontAwesomeIcon icon={faGithub} className="h-4 w-4" />
+                  {oauthLoading === 'github' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <FontAwesomeIcon icon={faGithub} className="h-4 w-4" />
+                  )}
                 </button>
               </div>
             </div>
