@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { supabase } from '@/lib/supabase';
-import { dbToBank } from '@/lib/question-utils';
 import type { Bank } from '@/lib/types';
 
 export function PracticeSetup() {
@@ -23,20 +22,20 @@ export function PracticeSetup() {
   const [starting, setStarting] = useState(false);
 
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-    supabase.from('banks').select('*, questions(count)').order('created_at', { ascending: false })
-      .then(({ data, error: err }) => {
-        if (err) { setError(err.message); return; }
-        const list = (data || []).map((row: any) => dbToBank({ ...row, question_count: row.questions?.[0]?.count || 0 }));
-        setBanks(list);
-        if (preSelectedBankId && list.find((b: Bank) => b.id === preSelectedBankId)) {
-          setSelectedBank(preSelectedBankId);
-        } else if (list.length > 0) {
-          setSelectedBank(list[0].id);
-        }
-      })
-      .finally(() => setLoading(false));
+    (async () => {
+      setLoading(true);
+      setError(null);
+      const { data, error: err } = await supabase.from('banks').select('*, questions(count)').order('created_at', { ascending: false });
+      if (err) { setError(err.message); setLoading(false); return; }
+      const list = (data || []).map((row: any) => dbToBank({ ...row, question_count: row.questions?.[0]?.count || 0 }));
+      setBanks(list);
+      if (preSelectedBankId && list.find((b: Bank) => b.id === preSelectedBankId)) {
+        setSelectedBank(preSelectedBankId);
+      } else if (list.length > 0) {
+        setSelectedBank(list[0].id);
+      }
+      setLoading(false);
+    })();
   }, [preSelectedBankId]);
 
   const handleStart = async () => {
