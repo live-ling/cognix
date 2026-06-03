@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { supabase } from '@/lib/supabase';
+import { dbToBank } from '@/lib/question-utils';
 import type { Bank } from '@/lib/types';
 
 export function PracticeSetup() {
