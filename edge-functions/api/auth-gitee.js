@@ -26,13 +26,13 @@ export default async function onRequest(context) {
     const tokenResp = await fetch('https://gitee.com/oauth/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        client_id: GITEE_CLIENT_ID,
-        client_secret: GITEE_CLIENT_SECRET,
-        redirect_uri: redirect_uri || '',
-      }),
+      body: new URLSearchParams([
+        ['grant_type', 'authorization_code'],
+        ['code', code],
+        ['client_id', GITEE_CLIENT_ID],
+        ['client_secret', GITEE_CLIENT_SECRET],
+        ['redirect_uri', redirect_uri || ''],
+      ]),
     });
     if (!tokenResp.ok) throw new Error(`Gitee token error: ${await tokenResp.text()}`);
     const tokenData = await tokenResp.json();
