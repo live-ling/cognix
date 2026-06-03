@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate, Navigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, Navigate, useSearchParams } from 'react-router-dom';
 import { Eye, EyeOff, Loader2, ArrowLeft } from 'lucide-react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faGithub } from '@fortawesome/free-brands-svg-icons';
@@ -17,13 +17,43 @@ const REMEMBER_ME_FLAG = 'cognix_remember_me';
 const REMEMBER_PWD_FLAG = 'cognix_remember_pwd';
 
 export function Login() {
-  const { user, login, register } = useSupabaseAuth();
+  const { user, login, register, refreshUser } = useSupabaseAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [isRegister, setIsRegister] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [oauthLoading, setOauthLoading] = useState<string | null>(null); // tracks which OAuth provider is loading
+  const [oauthLoading, setOauthLoading] = useState<string | null>(null);
+
+  // Handle Gitee OAuth callback
+  useEffect(() => {
+    const code = searchParams.get('code');
+    if (!code) return;
+
+    setOauthLoading('gitee');
+    const exchangeGiteeCode = async () => {
+      const { data, error: fnErr } = await supabase.functions.invoke('auth-gitee', {
+        body: { code, redirect_uri: `${window.location.origin}/login` },
+      });
+      if (fnErr || data?.error) {
+        setError(fnErr?.message || data?.error || 'Gitee 登录失败');
+        setOauthLoading(null);
+        // Clean URL
+        window.history.replaceState({}, '', '/login');
+        return;
+      }
+      if (data?.access_token && data?.refresh_token) {
+        await supabase.auth.setSession({
+          access_token: data.access_token,
+          refresh_token: data.refresh_token,
+        });
+        await refreshUser();
+        navigate('/profile', { replace: true });
+      }
+    };
+    exchangeGiteeCode();
+  }, []);
 
   const [rememberMe, setRememberMe] = useState(() => {
     return getCookie(REMEMBER_ME_FLAG) === 'true';
@@ -49,9 +79,21 @@ export function Login() {
   const [password, setPassword] = useState(isPreLogin ? savedPassword : '');
   const [confirmPassword, setConfirmPassword] = useState('');
 
+  const GITEE_CLIENT_ID = 'your-gitee-client-id'; // Replace with actual client ID
+
   const handleOAuthLogin = async (provider: 'github' | 'gitee') => {
     setOauthLoading(provider);
     setError('');
+
+    if (provider === 'gitee') {
+      // Gitee: redirect to Gitee OAuth, it will come back to /login?code=xxx
+      const redirectUri = `${window.location.origin}/login`;
+      const authUrl = `https://gitee.com/oauth/authorize?client_id=${GITEE_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code`;
+      window.location.href = authUrl;
+      return;
+    }
+
+    // GitHub: use Supabase built-in OAuth
     const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
