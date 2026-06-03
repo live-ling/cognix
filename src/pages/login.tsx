@@ -79,14 +79,18 @@ export function Login() {
   const [password, setPassword] = useState(isPreLogin ? savedPassword : '');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  const GITEE_CLIENT_ID = 'your-gitee-client-id'; // Replace with actual client ID
+  const GITEE_CLIENT_ID = import.meta.env.VITE_GITEE_CLIENT_ID || '';
 
   const handleOAuthLogin = async (provider: 'github' | 'gitee') => {
     setOauthLoading(provider);
     setError('');
 
     if (provider === 'gitee') {
-      // Gitee: redirect to Gitee OAuth, it will come back to /login?code=xxx
+      if (!GITEE_CLIENT_ID) {
+        setError('Gitee 登录尚未配置，请联系管理员');
+        setOauthLoading(null);
+        return;
+      }
       const redirectUri = `${window.location.origin}/login`;
       const authUrl = `https://gitee.com/oauth/authorize?client_id=${GITEE_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code`;
       window.location.href = authUrl;
