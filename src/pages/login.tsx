@@ -36,7 +36,11 @@ export function Login() {
       const res = await fetch('/api/auth-gitee', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, redirect_uri: `${window.location.origin}/login` }),
+        body: JSON.stringify({
+          code,
+          redirect_uri: `${window.location.origin}/login`,
+          client_id: GITEE_CLIENT_ID,
+        }),
       });
       const data = await res.json();
       if (!res.ok || data?.error) {

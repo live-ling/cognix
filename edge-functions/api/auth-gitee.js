@@ -14,11 +14,12 @@ export default async function onRequest(context) {
   }
 
   try {
-    const { code, redirect_uri } = await context.request.json();
+    const body = await context.request.json();
+    const { code, redirect_uri } = body;
     if (!code) throw new Error('Missing code');
 
-    const GITEE_CLIENT_ID = context.env.GITEE_CLIENT_ID;
-    const GITEE_CLIENT_SECRET = context.env.GITEE_CLIENT_SECRET;
+    const GITEE_CLIENT_ID = context.env.GITEE_CLIENT_ID || body.client_id || '';
+    const GITEE_CLIENT_SECRET = context.env.GITEE_CLIENT_SECRET || '';
     const SUPABASE_URL = context.env.SUPABASE_URL || 'https://bbiwowuwlrneivycdqkf.supabase.co';
     const SERVICE_ROLE_KEY = context.env.SUPABASE_SERVICE_ROLE_KEY;
 
