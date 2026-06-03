@@ -20,7 +20,7 @@ create table public.profiles (
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
-security definer set search_path = ''
+security definer set search_path = 'public'
 as $$
 begin
   insert into public.profiles (id, name)
@@ -219,50 +219,28 @@ create policy "Users can read own imports"
 -- ============================================================
 create or replace function public.get_dashboard_stats()
 returns jsonb
-language plpgsql
-security definer set search_path = ''
+language sql
+security definer set search_path = 'public'
 as $$
-declare
-  uid uuid := auth.uid();
-  result jsonb;
-begin
+  with uid as (select auth.uid() as id)
   select jsonb_build_object(
-    'today_answered', coalesce((
-      select sum(count) from public.learning_logs
-      where user_id = uid and date = current_date
-    ), 0),
-    'accuracy', coalesce((
-      select round(
-        sum(correct)::decimal / nullif(sum(count), 0)::decimal, 2
-      ) from public.learning_logs
-      where user_id = uid and date = current_date
-    ), 0),
+    'today_answered', coalesce((select sum(count) from public.learning_logs where user_id = (select id from uid) and date = current_date), 0),
+    'accuracy', coalesce((select round(sum(correct)::decimal / nullif(sum(count), 0)::decimal, 2) from public.learning_logs where user_id = (select id from uid) and date = current_date), 0),
     'streak_days', (
+      with dates as (
+        select date from public.learning_logs where user_id = (select id from uid) and count > 0 order by date desc
+      )
       select count(*) from (
-        select date
-        from public.learning_logs
-        where user_id = uid and count > 0
-        order by date desc
-      ) d
+        select date, date - row_number() over (order by date desc)::int as grp from dates
+      ) d where grp = (select max(date - row_number() over (order by date desc)::int) from dates)
     ),
-    'bank_count', coalesce((
-      select count(*) from public.banks where user_id = uid
-    ), 0),
-    'total_questions', coalesce((
-      select count(*) from public.questions q
-      join public.banks b on q.bank_id = b.id
-      where b.user_id = uid
-    ), 0),
-    'avg_accuracy', coalesce((
-      select round(
-        sum(correct)::decimal / nullif(sum(count), 0)::decimal, 2
-      ) from public.learning_logs where user_id = uid
-    ), 0),
+    'bank_count', coalesce((select count(*) from public.banks where user_id = (select id from uid)), 0),
+    'total_questions', coalesce((select count(*) from public.questions q join public.banks b on q.bank_id = b.id where b.user_id = (select id from uid)), 0),
+    'avg_accuracy', coalesce((select round(sum(correct)::decimal / nullif(sum(count), 0)::decimal, 2) from public.learning_logs where user_id = (select id from uid)), 0),
     'max_streak', 0,
     'heatmap', coalesce((
       select jsonb_agg(jsonb_build_object('date', date, 'count', count))
-      from public.learning_logs
-      where user_id = uid and date >= current_date - interval '6 months'
+      from public.learning_logs where user_id = (select id from uid) and date >= current_date - interval '6 months'
       order by date
     ), '[]'::jsonb),
     'recent_sessions', coalesce((
@@ -275,13 +253,9 @@ begin
         'duration', concat(floor(time_spent / 60), ':', lpad((time_spent % 60)::text, 2, '0'))
       ))
       from (
-        select * from public.practice_sessions
-        where user_id = uid and is_completed = true
+        select * from public.practice_sessions where user_id = (select id from uid) and is_completed = true
         order by created_at desc limit 10
       ) s
     ), '[]'::jsonb)
-  ) into result;
-
-  return result;
-end;
+  );
 $$;
