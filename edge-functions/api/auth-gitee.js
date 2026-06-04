@@ -100,28 +100,27 @@ export default async function onRequest(context) {
       userId = newUser.id;
     }
 
-    // 4. Generate a recovery link to get session tokens
+    // 4. Generate invite link to get session tokens
     const linkResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/generate_link`, {
       method: 'POST',
       headers: adminHeaders,
       body: JSON.stringify({
-        type: 'magiclink',
+        type: 'invite',
         email,
       }),
     });
     const linkData = await linkResp.json();
     if (!linkResp.ok) throw new Error(`generate_link failed: ${JSON.stringify(linkData)}`);
 
-    // Extract tokens from the action_link
+    // Extract tokens from action_link hash
     const actionLink = linkData.action_link || '';
-    const urlObj = new URL(actionLink);
-    const hash = urlObj.hash; // #access_token=...&refresh_token=...
-    if (!hash) throw new Error('No hash in action_link');
+    const hashIdx = actionLink.indexOf('#');
+    if (hashIdx === -1) throw new Error('No hash in action_link: ' + actionLink.slice(0, 100));
 
-    const params = new URLSearchParams(hash.slice(1));
+    const params = new URLSearchParams(actionLink.slice(hashIdx + 1));
     const accessToken = params.get('access_token');
     const refreshToken = params.get('refresh_token');
-    if (!accessToken) throw new Error('No access_token in action_link');
+    if (!accessToken) throw new Error('No access_token in link');
 
     return new Response(JSON.stringify({
       access_token: accessToken,
