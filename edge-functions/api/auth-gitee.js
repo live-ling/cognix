@@ -100,19 +100,18 @@ export default async function onRequest(context) {
       userId = newUser.id;
     }
 
-    // 4. Generate invite link to get session tokens
+    // 4. Generate link to get session tokens
+    //    New users: invite, Existing users: recovery
+    const isNewUser = !existing?.users?.length;
+    const linkType = isNewUser ? 'invite' : 'recovery';
     const linkResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/generate_link`, {
       method: 'POST',
       headers: adminHeaders,
-      body: JSON.stringify({
-        type: 'invite',
-        email,
-      }),
+      body: JSON.stringify({ type: linkType, email }),
     });
     const linkData = await linkResp.json();
     if (!linkResp.ok) throw new Error(`generate_link failed: ${JSON.stringify(linkData)}`);
 
-    // Extract tokens from action_link hash
     const actionLink = linkData.action_link || '';
     const hashIdx = actionLink.indexOf('#');
     if (hashIdx === -1) throw new Error('No hash in action_link: ' + actionLink.slice(0, 100));
