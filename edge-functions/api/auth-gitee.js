@@ -58,7 +58,7 @@ export default async function onRequest(context) {
 
     // 3. Find or create Supabase user
     const existingCheck = await fetch(
-      `${SUPABASE_URL}/auth/v1/admin/users?filter=${encodeURIComponent(`email==eq.${email}`)}`,
+      `${SUPABASE_URL}/auth/v1/admin/users?filter=${encodeURIComponent(`email=eq.${email}`)}`,
       { headers: { Authorization: `Bearer ${SERVICE_ROLE_KEY}`, apikey: SERVICE_ROLE_KEY } }
     );
     if (!existingCheck.ok) {
