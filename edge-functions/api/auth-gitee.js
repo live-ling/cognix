@@ -66,8 +66,6 @@ export default async function onRequest(context) {
       throw new Error(`Supabase list users failed: ${existingCheck.status} ${errText.slice(0, 200)}`);
     }
     const existing = await existingCheck.json();
-
-    const tempPass = randomPassword();
     let userId;
 
     if (existing?.users?.length > 0) {
@@ -76,7 +74,6 @@ export default async function onRequest(context) {
         method: 'PUT',
         headers: adminHeaders,
         body: JSON.stringify({
-          password: tempPass,
           user_metadata: { name, avatar_url: giteeUser.avatar_url || '' },
           app_metadata: { provider: 'gitee', gitee_id: giteeId },
         }),
@@ -86,6 +83,7 @@ export default async function onRequest(context) {
         throw new Error(`Update user failed: ${updateResp.status} ${errText.slice(0, 200)}`);
       }
     } else {
+      const tempPass = randomPassword();
       const createResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
         method: 'POST',
         headers: adminHeaders,
@@ -102,20 +100,32 @@ export default async function onRequest(context) {
       userId = newUser.id;
     }
 
-    // 4. Sign in to get session
-    const signInResp = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+    // 4. Generate a recovery link to get session tokens
+    const linkResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/generate_link`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: SERVICE_ROLE_KEY },
-      body: JSON.stringify({ email, password: tempPass, gotrue_meta_security: {} }),
+      headers: adminHeaders,
+      body: JSON.stringify({
+        type: 'magiclink',
+        email,
+      }),
     });
-    const session = await signInResp.json();
-    if (!session.access_token) {
-      throw new Error(`Failed to create session: ${JSON.stringify(session)}`);
-    }
+    const linkData = await linkResp.json();
+    if (!linkResp.ok) throw new Error(`generate_link failed: ${JSON.stringify(linkData)}`);
+
+    // Extract tokens from the action_link
+    const actionLink = linkData.action_link || '';
+    const urlObj = new URL(actionLink);
+    const hash = urlObj.hash; // #access_token=...&refresh_token=...
+    if (!hash) throw new Error('No hash in action_link');
+
+    const params = new URLSearchParams(hash.slice(1));
+    const accessToken = params.get('access_token');
+    const refreshToken = params.get('refresh_token');
+    if (!accessToken) throw new Error('No access_token in action_link');
 
     return new Response(JSON.stringify({
-      access_token: session.access_token,
-      refresh_token: session.refresh_token,
+      access_token: accessToken,
+      refresh_token: refreshToken,
     }), {
       headers: { 'Content-Type': 'application/json' },
     });
