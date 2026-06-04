@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  User, Edit3, Save, X,
+  User, Edit3, Save, X, Upload, Camera,
   BarChart3, Star, Award, Settings, Plug, Lock,
   CheckCircle, XCircle, Loader2, Eye, EyeOff,
   BookOpen, Clock, Flame, Target, TrendingUp, Zap,
@@ -55,13 +55,18 @@ export function Profile() {
   });
   const [loading, setLoading] = useState(!stats);
 
-  // Edit profile state
-  const [editingName, setEditingName] = useState(false);
+  // Edit profile modal state
+  const [editModalOpen, setEditModalOpen] = useState(false);
   const [editName, setEditName] = useState('');
-  const [editingBio, setEditingBio] = useState(false);
   const [editBio, setEditBio] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [editAvatarUrl, setEditAvatarUrl] = useState('');
+  const [editQqNumber, setEditQqNumber] = useState('');
+  const [editAvatarMode, setEditAvatarMode] = useState<'upload' | 'qq'>('upload');
+  const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState('');
+  const [editAvatarPreview, setEditAvatarPreview] = useState('');
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   // Password modal
   const [pwdModalOpen, setPwdModalOpen] = useState(false);
@@ -110,27 +115,70 @@ export function Profile() {
     return { name: '初学者', color: 'bg-green-500/10 text-green-600', icon: User };
   };
 
-  // ===== Profile save handlers =====
-  const handleSaveName = async () => {
-    if (!editName.trim() || !user) return;
-    setSaving(true);
+  // ===== Edit profile modal handlers =====
+  const openEditModal = () => {
+    setEditName(user?.name || '');
+    setEditBio(user?.bio || '');
+    setEditAvatarUrl(user?.avatar_url || '');
+    setEditQqNumber('');
+    setEditAvatarMode('upload');
+    setEditAvatarPreview(user?.avatar_url || '');
     setEditError('');
-    const { error } = await supabase.from('profiles').update({ name: editName.trim() }).eq('id', user.id);
-    if (error) { setEditError(error.message); setSaving(false); return; }
-    await refreshUser();
-    setEditingName(false);
-    setSaving(false);
+    setEditSaving(false);
+    setUploadingAvatar(false);
+    setEditModalOpen(true);
   };
 
-  const handleSaveBio = async () => {
+  const handleAvatarUpload = async (file: File) => {
     if (!user) return;
-    setSaving(true);
+    setUploadingAvatar(true);
     setEditError('');
-    const { error } = await supabase.from('profiles').update({ bio: editBio.trim() }).eq('id', user.id);
-    if (error) { setEditError(error.message); setSaving(false); return; }
+    try {
+      const ext = file.name.split('.').pop() || 'jpg';
+      const path = `${user.id}/avatar.${ext}`;
+
+      // Delete old avatar if exists
+      if (user.avatar_url) {
+        const oldPath = user.avatar_url.split('/avatars/')[1];
+        if (oldPath) {
+          await supabase.storage.from('avatars').remove([oldPath]);
+        }
+      }
+
+      const { error: uploadError } = await supabase.storage.from('avatars').upload(path, file, { upsert: true });
+      if (uploadError) throw new Error(uploadError.message);
+
+      const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path);
+      setEditAvatarUrl(urlData.publicUrl);
+      setEditAvatarPreview(urlData.publicUrl);
+    } catch (err: any) {
+      setEditError(err.message || '上传失败');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
+  const handleQqAvatar = () => {
+    if (!editQqNumber.trim()) { setEditError('请输入 QQ 号'); return; }
+    const url = `https://q.qlogo.cn/g?b=qq&nk=${editQqNumber.trim()}&s=100`;
+    setEditAvatarUrl(url);
+    setEditAvatarPreview(url);
+    setEditError('');
+  };
+
+  const handleSaveProfile = async () => {
+    if (!editName.trim() || !user) { setEditError('用户名不能为空'); return; }
+    setEditSaving(true);
+    setEditError('');
+    const { error } = await supabase.from('profiles').update({
+      name: editName.trim(),
+      bio: editBio.trim(),
+      avatar_url: editAvatarUrl,
+    }).eq('id', user.id);
+    if (error) { setEditError(error.message); setEditSaving(false); return; }
     await refreshUser();
-    setEditingBio(false);
-    setSaving(false);
+    setEditModalOpen(false);
+    setEditSaving(false);
   };
 
   // ===== Password handlers =====
@@ -273,71 +321,32 @@ export function Profile() {
         <div className="absolute top-1/3 right-1/3 w-24 h-24 bg-primary/5 rounded-full blur-xl" />
 
         <div className="relative h-full max-w-[1200px] mx-auto px-6 flex items-center gap-6">
-          <UserAvatar name={user.name} email={user.email} size="xl" />
+          <div className="relative">
+            <UserAvatar name={user.name} email={user.email} avatarUrl={user.avatar_url} size="xl" />
+            <button
+              type="button"
+              onClick={openEditModal}
+              className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-background border border-border flex items-center justify-center hover:bg-accent transition-colors"
+              title="编辑资料"
+            >
+              <Camera className="h-3.5 w-3.5" />
+            </button>
+          </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 mb-1">
-              {editingName ? (
-                <div className="flex items-center gap-2">
-                  <Input
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    className="h-8 max-w-[200px] bg-background/60"
-                    autoFocus
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleSaveName(); }}
-                  />
-                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={handleSaveName} disabled={saving}>
-                    <Save className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setEditingName(false); setEditError(''); }}>
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              ) : (
-                <>
-                  <h1 className="text-3xl font-bold">{user.name}</h1>
-                  <Button
-                    size="icon" variant="ghost"
-                    className="h-7 w-7 opacity-60 hover:opacity-100"
-                    onClick={() => { setEditingName(true); setEditName(user.name); setEditError(''); }}
-                  >
-                    <Edit3 className="h-3.5 w-3.5" />
-                  </Button>
-                </>
-              )}
+              <h1 className="text-3xl font-bold">{user.name}</h1>
+              <Button
+                size="icon" variant="ghost"
+                className="h-7 w-7 opacity-60 hover:opacity-100"
+                onClick={openEditModal}
+              >
+                <Edit3 className="h-3.5 w-3.5" />
+              </Button>
             </div>
 
-            <div className="mb-2 max-w-md">
-              {editingBio ? (
-                <div className="space-y-2">
-                  <textarea
-                    className="w-full text-sm bg-background/60 rounded-md border border-input px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-ring"
-                    rows={2} maxLength={200}
-                    placeholder="写点什么介绍自己..."
-                    value={editBio}
-                    onChange={(e) => setEditBio(e.target.value)}
-                    autoFocus
-                  />
-                  <div className="flex items-center gap-1">
-                    <Button size="sm" className="h-6 text-xs" onClick={handleSaveBio} disabled={saving}>
-                      {saving ? '保存中...' : '保存'}
-                    </Button>
-                    <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => { setEditingBio(false); setEditError(''); }}>
-                      取消
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <p
-                  className="text-sm text-muted-foreground cursor-pointer hover:text-foreground transition-colors"
-                  onClick={() => { setEditingBio(true); setEditBio(user.bio || ''); setEditError(''); }}
-                  title="点击编辑个人简介"
-                >
-                  {user.bio || '点击添加个人简介...'}
-                </p>
-              )}
-            </div>
-
-            {editError && <p className="text-xs text-destructive mb-1">{editError}</p>}
+            <p className="text-sm text-muted-foreground mb-2 max-w-md">
+              {user.bio || '暂无个人简介'}
+            </p>
 
             <div className="flex items-center gap-2">
               <Badge variant="secondary" className="text-xs">ID: {user.id.slice(0, 8)}</Badge>
@@ -555,6 +564,115 @@ export function Profile() {
         </div>
       </div>
       </div>
+
+      {/* ===== Edit Profile Modal ===== */}
+      <Modal open={editModalOpen} onClose={() => setEditModalOpen(false)} title="编辑资料">
+        <div className="space-y-4">
+          {/* Avatar preview */}
+          <div className="flex flex-col items-center gap-3">
+            <div className="relative">
+              <UserAvatar name={editName} email={user.email} avatarUrl={editAvatarPreview} size="xl" />
+              {uploadingAvatar && (
+                <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center">
+                  <Loader2 className="h-6 w-6 text-white animate-spin" />
+                </div>
+              )}
+            </div>
+
+            {/* Avatar mode tabs */}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${editAvatarMode === 'upload' ? 'border-primary bg-primary/5 text-primary' : 'border-border hover:border-primary/30'}`}
+                onClick={() => setEditAvatarMode('upload')}
+              >
+                <Upload className="h-3 w-3 inline mr-1" />上传图片
+              </button>
+              <button
+                type="button"
+                className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${editAvatarMode === 'qq' ? 'border-primary bg-primary/5 text-primary' : 'border-border hover:border-primary/30'}`}
+                onClick={() => setEditAvatarMode('qq')}
+              >
+                QQ 头像
+              </button>
+            </div>
+
+            {/* Avatar upload */}
+            {editAvatarMode === 'upload' && (
+              <div className="w-full">
+                <div
+                  className="border-2 border-dashed rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors"
+                  onClick={() => avatarInputRef.current?.click()}
+                >
+                  <Upload className="h-6 w-6 mx-auto mb-1 text-muted-foreground" />
+                  <p className="text-xs text-muted-foreground">点击上传头像（最大 5MB）</p>
+                </div>
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/*"
+                  title="上传头像"
+                  aria-label="上传头像"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleAvatarUpload(file);
+                  }}
+                />
+              </div>
+            )}
+
+            {/* QQ avatar */}
+            {editAvatarMode === 'qq' && (
+              <div className="w-full flex gap-2">
+                <Input
+                  placeholder="输入 QQ 号"
+                  value={editQqNumber}
+                  onChange={(e) => setEditQqNumber(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleQqAvatar(); }}
+                />
+                <Button size="sm" onClick={handleQqAvatar}>获取</Button>
+              </div>
+            )}
+          </div>
+
+          {/* Name */}
+          <div>
+            <label htmlFor="edit-name" className="text-sm font-medium mb-1.5 block">用户名</label>
+            <Input
+              id="edit-name"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              placeholder="输入用户名"
+              required
+            />
+          </div>
+
+          {/* Bio */}
+          <div>
+            <label htmlFor="edit-bio" className="text-sm font-medium mb-1.5 block">个性签名</label>
+            <textarea
+              id="edit-bio"
+              className="w-full text-sm rounded-md border border-input bg-background px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-ring"
+              rows={3}
+              maxLength={200}
+              placeholder="写点什么介绍自己..."
+              value={editBio}
+              onChange={(e) => setEditBio(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground mt-1">{editBio.length}/200</p>
+          </div>
+
+          {editError && <p className="text-xs text-destructive bg-destructive/10 px-3 py-2 rounded-md">{editError}</p>}
+
+          <div className="flex gap-2">
+            <Button variant="outline" className="flex-1" onClick={() => setEditModalOpen(false)}>取消</Button>
+            <Button className="flex-1" onClick={handleSaveProfile} disabled={editSaving}>
+              {editSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />保存中...</> : <><Save className="h-4 w-4 mr-2" />保存</>}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* ===== Change Password Modal ===== */}
       <Modal open={pwdModalOpen} onClose={() => setPwdModalOpen(false)} title="修改密码">

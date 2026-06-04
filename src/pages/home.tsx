@@ -7,6 +7,7 @@ import { Card, CardDescription, CardTitle } from '@/components/ui/card';
 import { supabase } from '@/lib/supabase';
 import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
 import { CacheManager } from '@/lib/cache';
+import { useSaying } from '@/hooks/use-saying';
 import type { DashboardStats } from '@/lib/types';
 
 const features = [
@@ -44,6 +45,7 @@ const features = [
 
 export function Home() {
   const { user } = useSupabaseAuth();
+  const saying = useSaying();
   const [stats, setStats] = useState<DashboardStats | null>(null);
 
   useEffect(() => {
@@ -79,6 +81,13 @@ export function Home() {
               智能题库练习平台，让每一次练习都高效且有收获。
               支持多种题型、智能错题分析、学习数据追踪。
             </p>
+
+            {/* 一言 */}
+            {saying.text && (
+              <div className="flex items-start gap-2 max-w-xl">
+                <p className="text-sm text-muted-foreground/70 italic leading-relaxed">{saying.text}</p>
+              </div>
+            )}
 
             {/* CTA Buttons */}
             <div className="flex flex-wrap gap-3 pt-4">

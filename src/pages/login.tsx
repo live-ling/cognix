@@ -9,6 +9,7 @@ import { supabase } from '@/lib/supabase';
 import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
 import { UserAvatar } from '@/components/user-avatar';
 import { getCookie, setCookie, removeCookie } from '@/lib/cookies';
+import { useSaying } from '@/hooks/use-saying';
 
 const REMEMBER_EMAIL_KEY = 'cognix_remember_email';
 const REMEMBER_PASSWORD_KEY = 'cognix_remember_password';
@@ -18,6 +19,7 @@ const REMEMBER_PWD_FLAG = 'cognix_remember_pwd';
 
 export function Login() {
   const { user, login, register, refreshUser } = useSupabaseAuth();
+  const saying = useSaying();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [isRegister, setIsRegister] = useState(false);
@@ -229,6 +231,15 @@ export function Login() {
               Cognix 是一个智能题库练习平台，支持多种题型、错题分析、学习数据追踪，让每一次练习都更有收获。
             </p>
           </div>
+
+          {/* 一言 — bottom left */}
+          {saying.text && (
+            <div className="absolute bottom-8 left-16 xl:left-24 right-16">
+              <div className="flex items-start gap-2">
+                <p className="text-sm text-muted-foreground/50 italic leading-relaxed">{saying.text}</p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

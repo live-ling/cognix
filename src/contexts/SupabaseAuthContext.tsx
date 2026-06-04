@@ -8,6 +8,7 @@ export interface AppUser {
   name: string;
   email: string;
   bio: string;
+  avatar_url: string;
   ai_configured: boolean;
   ai_api_key: string;
   ai_base_url: string;
@@ -43,6 +44,7 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       ai_configured: !!p.ai_api_key,
       ai_api_key: p.ai_api_key || '',
       ai_base_url: p.ai_base_url || '',
+      avatar_url: p.avatar_url || '',
       ai_model: p.ai_model || '',
       created_at: s.user.created_at || '',
     };

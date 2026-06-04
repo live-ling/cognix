@@ -9,6 +9,7 @@ create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   name text not null default '',
   bio text default '',
+  avatar_url text default '',
   ai_api_key text,
   ai_base_url text,
   ai_model text,
@@ -212,6 +213,54 @@ create policy "Users can read own imports"
   on storage.objects for select
   to authenticated
   using (bucket_id = 'ai-imports' and (select auth.uid())::text = (storage.foldername(name))[1]);
+
+-- 9. Storage bucket for avatars
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('avatars', 'avatars', true, 5242880)
+on conflict (id) do nothing;
+
+create policy "Anyone can read avatars"
+  on storage.objects for select
+  using (bucket_id = 'avatars');
+
+create policy "Users can upload own avatar"
+  on storage.objects for insert
+  to authenticated
+  with check (bucket_id = 'avatars' and (select auth.uid())::text = (storage.foldername(name))[1]);
+
+create policy "Users can update own avatar"
+  on storage.objects for update
+  to authenticated
+  using (bucket_id = 'avatars' and (select auth.uid())::text = (storage.foldername(name))[1]);
+
+create policy "Users can delete own avatar"
+  on storage.objects for delete
+  to authenticated
+  using (bucket_id = 'avatars' and (select auth.uid())::text = (storage.foldername(name))[1]);
+
+-- 10. Cleanup unused avatars function (run periodically via cron or manually)
+create or replace function public.cleanup_unused_avatars()
+returns void
+language plpgsql
+security definer set search_path = 'public'
+as $$
+declare
+  obj record;
+begin
+  for obj in
+    select name from storage.objects
+    where bucket_id = 'avatars'
+    and created_at < now() - interval '1 day'
+  loop
+    -- Check if any profile references this avatar
+    if not exists (
+      select 1 from profiles where avatar_url like '%' || obj.name || '%'
+    ) then
+      delete from storage.objects where bucket_id = 'avatars' and name = obj.name;
+    end if;
+  end loop;
+end;
+$$;
 
 
 -- ============================================================

@@ -6,6 +6,8 @@ interface UserAvatarProps {
   name?: string;
   /** User's email (used for QQ avatar detection) */
   email?: string;
+  /** Custom avatar URL (from upload or QQ) */
+  avatarUrl?: string;
   /** Avatar size: sm = 24px, md = 32px, lg = 48px, xl = 80px */
   size?: 'sm' | 'md' | 'lg' | 'xl';
   /** Additional CSS classes */
@@ -38,13 +40,14 @@ function getNameFromEmail(email: string): string {
   return local || '?';
 }
 
-export function UserAvatar({ name, email, size = 'md', className }: UserAvatarProps) {
+export function UserAvatar({ name, email, avatarUrl, size = 'md', className }: UserAvatarProps) {
   const [imgError, setImgError] = useState(false);
 
   const displayName = name || (email ? getNameFromEmail(email) : '?');
   const initial = displayName.charAt(0).toUpperCase();
   const qqAvatarUrl = email ? getQQAvatarUrl(email) : null;
-  const showImage = qqAvatarUrl && !imgError;
+  const imageUrl = avatarUrl || qqAvatarUrl;
+  const showImage = imageUrl && !imgError;
 
   return (
     <div
@@ -56,7 +59,7 @@ export function UserAvatar({ name, email, size = 'md', className }: UserAvatarPr
     >
       {showImage ? (
         <img
-          src={qqAvatarUrl}
+          src={imageUrl}
           alt={displayName}
           className="w-full h-full object-cover"
           onError={() => setImgError(true)}
