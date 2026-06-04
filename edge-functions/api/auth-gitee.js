@@ -5,6 +5,25 @@ function randomPassword() {
   return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2) + 'A1!b2@';
 }
 
+async function findUserByEmail(supabaseUrl, serviceKey, email) {
+  // List users page by page to find by email
+  let page = 1;
+  const perPage = 1000;
+  while (true) {
+    const resp = await fetch(
+      `${supabaseUrl}/auth/v1/admin/users?page=${page}&per_page=${perPage}`,
+      { headers: { Authorization: `Bearer ${serviceKey}`, apikey: serviceKey } }
+    );
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const users = data.users || [];
+    const found = users.find(u => u.email === email);
+    if (found) return found;
+    if (users.length < perPage) return null; // no more pages
+    page++;
+  }
+}
+
 export default async function onRequest(context) {
   if (context.request.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
@@ -55,92 +74,58 @@ export default async function onRequest(context) {
       'Content-Type': 'application/json',
     };
 
-    // 3. Try to create user (will fail if exists)
-    const tempPass = randomPassword();
-    const createResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
-      method: 'POST',
-      headers: adminHeaders,
-      body: JSON.stringify({
-        email,
-        password: tempPass,
-        email_confirm: true,
-        user_metadata: { name, avatar_url: giteeUser.avatar_url || '' },
-        app_metadata: { provider: 'gitee', gitee_id: giteeId },
-      }),
-    });
-    const createData = await createResp.json();
-
+    // 3. Find existing user or create new one
+    let existingUser = await findUserByEmail(SUPABASE_URL, SERVICE_ROLE_KEY, email);
     let userId;
+    const tempPass = randomPassword();
 
-    if (createData.error === 'email_exists' || createData.error_code === 'email_exists') {
-      // User exists — find them and update metadata
-      const listResp = await fetch(
-        `${SUPABASE_URL}/auth/v1/admin/users?filter=${encodeURIComponent(`email=eq.${email}`)}`,
-        { headers: adminHeaders }
-      );
-      const listData = await listResp.json();
-      if (!listData.users?.length) throw new Error('User not found after email_exists');
-      userId = listData.users[0].id;
-
-      // Update user metadata with Gitee info
+    if (existingUser) {
+      // User exists — update metadata and set password
+      userId = existingUser.id;
       await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userId}`, {
         method: 'PUT',
         headers: adminHeaders,
         body: JSON.stringify({
+          password: tempPass,
+          email_confirm: true,
           user_metadata: { name, avatar_url: giteeUser.avatar_url || '' },
           app_metadata: { provider: 'gitee', gitee_id: giteeId },
         }),
       });
-    } else if (createData.error) {
-      throw new Error(createData.error_description || createData.error);
     } else {
+      // Create new user
+      const createResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          email,
+          password: tempPass,
+          email_confirm: true,
+          user_metadata: { name, avatar_url: giteeUser.avatar_url || '' },
+          app_metadata: { provider: 'gitee', gitee_id: giteeId },
+        }),
+      });
+      const createData = await createResp.json();
+      if (createData.error) throw new Error(createData.error_description || createData.error);
       userId = createData.id;
     }
 
-    // 4. Generate invite link to get session tokens
-    //    This works for both new and existing users
-    const linkResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/generate_link`, {
+    // 4. Sign in to get session tokens (password was set in step 3)
+
+    const signInResp = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
       method: 'POST',
-      headers: adminHeaders,
-      body: JSON.stringify({ type: 'invite', email }),
+      headers: { 'Content-Type': 'application/json', apikey: SERVICE_ROLE_KEY },
+      body: JSON.stringify({ email, password: tempPass, gotrue_meta_security: {} }),
     });
-    const linkData = await linkResp.json();
-
-    // If invite fails (user exists), try magiclink
-    if (!linkResp.ok || linkData.error) {
-      const magicResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/generate_link`, {
-        method: 'POST',
-        headers: adminHeaders,
-        body: JSON.stringify({ type: 'magiclink', email }),
-      });
-      const magicData = await magicResp.json();
-      if (!magicResp.ok) throw new Error(`generate_link failed: ${JSON.stringify(magicData)}`);
-
-      const actionLink = magicData.action_link || '';
-      const hashIdx = actionLink.indexOf('#');
-      if (hashIdx === -1) throw new Error('No hash in magiclink: ' + actionLink.slice(0, 100));
-
-      const params = new URLSearchParams(actionLink.slice(hashIdx + 1));
-      const accessToken = params.get('access_token');
-      const refreshToken = params.get('refresh_token');
-      if (!accessToken) throw new Error('No access_token in magiclink');
-
-      return new Response(JSON.stringify({ access_token: accessToken, refresh_token: refreshToken }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
+    const session = await signInResp.json();
+    if (!session.access_token) {
+      throw new Error(`Sign in failed: ${JSON.stringify(session)}`);
     }
 
-    // Extract tokens from invite link
-    const actionLink = linkData.action_link || '';
-    const hashIdx = actionLink.indexOf('#');
-    if (hashIdx === -1) throw new Error('No hash in invite link: ' + actionLink.slice(0, 100));
-
-    const params = new URLSearchParams(actionLink.slice(hashIdx + 1));
-    const accessToken = params.get('access_token');
-    const refreshToken = params.get('refresh_token');
-    if (!accessToken) throw new Error('No access_token in invite link');
-
-    return new Response(JSON.stringify({ access_token: accessToken, refresh_token: refreshToken }), {
+    return new Response(JSON.stringify({
+      access_token: session.access_token,
+      refresh_token: session.refresh_token,
+    }), {
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (e) {
