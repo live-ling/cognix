@@ -2,7 +2,7 @@
 // Handles: POST /api/auth-gitee { code } → { access_token, refresh_token }
 
 function randomPassword() {
-  return crypto.randomUUID() + crypto.randomUUID();
+  return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2) + 'A1!';
 }
 
 export default async function onRequest(context) {
@@ -61,6 +61,10 @@ export default async function onRequest(context) {
       `${SUPABASE_URL}/auth/v1/admin/users?filter=${encodeURIComponent(`email==eq.${email}`)}`,
       { headers: { Authorization: `Bearer ${SERVICE_ROLE_KEY}`, apikey: SERVICE_ROLE_KEY } }
     );
+    if (!existingCheck.ok) {
+      const errText = await existingCheck.text();
+      throw new Error(`Supabase list users failed: ${existingCheck.status} ${errText.slice(0, 200)}`);
+    }
     const existing = await existingCheck.json();
 
     const tempPass = randomPassword();
@@ -68,7 +72,7 @@ export default async function onRequest(context) {
 
     if (existing?.users?.length > 0) {
       userId = existing.users[0].id;
-      await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userId}`, {
+      const updateResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userId}`, {
         method: 'PUT',
         headers: adminHeaders,
         body: JSON.stringify({
@@ -77,6 +81,10 @@ export default async function onRequest(context) {
           app_metadata: { provider: 'gitee', gitee_id: giteeId },
         }),
       });
+      if (!updateResp.ok) {
+        const errText = await updateResp.text();
+        throw new Error(`Update user failed: ${updateResp.status} ${errText.slice(0, 200)}`);
+      }
     } else {
       const createResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
         method: 'POST',
@@ -98,10 +106,12 @@ export default async function onRequest(context) {
     const signInResp = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', apikey: SERVICE_ROLE_KEY },
-      body: JSON.stringify({ email, password: tempPass }),
+      body: JSON.stringify({ email, password: tempPass, gotrue_meta_security: {} }),
     });
     const session = await signInResp.json();
-    if (!session.access_token) throw new Error('Failed to create session');
+    if (!session.access_token) {
+      throw new Error(`Failed to create session: ${JSON.stringify(session)}`);
+    }
 
     return new Response(JSON.stringify({
       access_token: session.access_token,
