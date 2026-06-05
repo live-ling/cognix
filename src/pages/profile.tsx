@@ -117,9 +117,9 @@ export function Profile() {
   };
 
   useEffect(() => {
-    if (stats) { setLoading(false); return; }
-    fetchStats();
+    if (stats) { setLoading(false); } else { fetchStats(); }
     fetchAiStats();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Fetch DeepSeek balance when user is available
