@@ -36,7 +36,7 @@ export function QuestionCard({
     }
 
     const isChosen = selectedAnswers.includes(label);
-    const isCorrectAnswer = result.correct_answers?.includes(label);
+    const isCorrectAnswer = result?.correct_answers?.includes(label);
 
     if (isCorrectAnswer) return 'correct';
     if (isChosen && !result.is_correct) return 'wrong';

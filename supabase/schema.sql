@@ -308,3 +308,61 @@ as $$
     ), '[]'::jsonb)
   );
 $$;
+
+
+-- ============================================================
+-- AI usage tracking
+-- ============================================================
+create table public.ai_usage_logs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  action text not null,
+  model text not null default '',
+  prompt_tokens int not null default 0,
+  completion_tokens int not null default 0,
+  total_tokens int not null default 0,
+  created_at timestamptz default now()
+);
+
+create index idx_ai_usage_user_created on public.ai_usage_logs(user_id, created_at desc);
+
+alter table public.ai_usage_logs enable row level security;
+
+create policy "Users can read own ai usage"
+  on public.ai_usage_logs for select
+  to authenticated
+  using ((select auth.uid()) = user_id);
+
+create policy "Users can insert own ai usage"
+  on public.ai_usage_logs for insert
+  to authenticated
+  with check ((select auth.uid()) = user_id);
+
+
+create or replace function public.get_ai_usage_stats()
+returns jsonb
+language sql
+security definer set search_path = 'public'
+as $$
+  with uid as (select auth.uid() as id)
+  select jsonb_build_object(
+    'today_calls', coalesce((select count(*) from ai_usage_logs where user_id = (select id from uid) and created_at::date = current_date), 0),
+    'total_calls', coalesce((select count(*) from ai_usage_logs where user_id = (select id from uid)), 0),
+    'today_tokens', coalesce((select sum(total_tokens) from ai_usage_logs where user_id = (select id from uid) and created_at::date = current_date), 0),
+    'total_tokens', coalesce((select sum(total_tokens) from ai_usage_logs where user_id = (select id from uid)), 0),
+    'recent_logs', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'action', action,
+        'model', model,
+        'prompt_tokens', prompt_tokens,
+        'completion_tokens', completion_tokens,
+        'total_tokens', total_tokens,
+        'created_at', to_char(created_at, 'YYYY-MM-DD HH24:MI')
+      ))
+      from (
+        select * from ai_usage_logs where user_id = (select id from uid)
+        order by created_at desc limit 10
+      ) r
+    ), '[]'::jsonb)
+  );
+$$;

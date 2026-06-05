@@ -15,31 +15,37 @@ const features = [
     icon: BookOpen,
     title: '题库管理',
     desc: '创建和管理题库，支持多种题型和难度分类，让题目组织井井有条。',
+    link: '/banks',
   },
   {
     icon: FileText,
     title: '智能导入',
     desc: '批量导入题目，自动识别题型和答案，大幅提升题目录入效率。',
+    link: '/banks',
   },
   {
     icon: Target,
     title: '错题复习',
     desc: '自动记录错题，智能推送薄弱知识点，针对性强化训练。',
+    link: '/mistakes',
   },
   {
     icon: BarChart3,
     title: '多维统计',
     desc: '学习热力图、正确率趋势、用时分析，全方位掌握学习进度。',
+    link: '/profile',
   },
   {
     icon: Lightbulb,
     title: '模拟考试',
     desc: '自由设置题目数量和模式，模拟真实考试环境，提升应试能力。',
+    link: '/practice',
   },
   {
     icon: Brain,
     title: '智能推荐',
     desc: '基于答题表现智能推荐练习内容，科学提升学习效率。',
+    link: '/practice',
   },
 ];
 
@@ -156,17 +162,19 @@ export function Home() {
             const delays = ['delay-0', 'delay-75', 'delay-150', 'delay-200', 'delay-300', 'delay-500'];
             return (
               <ScrollReveal key={item.title} animation="block-stack" delay={delays[i]}>
-                <Card className="hover-lift h-full p-6 border-border/60">
-                  <div className="flex flex-col items-start text-left gap-4">
-                    <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-primary/10 text-primary">
-                      <item.icon className="h-5 w-5" />
+                <Link to={item.link}>
+                  <Card className="hover-lift h-full p-6 border-border/60 cursor-pointer">
+                    <div className="flex flex-col items-start text-left gap-4">
+                      <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-primary/10 text-primary">
+                        <item.icon className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <CardTitle className="mb-2 text-base">{item.title}</CardTitle>
+                        <CardDescription className="leading-relaxed">{item.desc}</CardDescription>
+                      </div>
                     </div>
-                    <div>
-                      <CardTitle className="mb-2 text-base">{item.title}</CardTitle>
-                      <CardDescription className="leading-relaxed">{item.desc}</CardDescription>
-                    </div>
-                  </div>
-                </Card>
+                  </Card>
+                </Link>
               </ScrollReveal>
             );
           })}

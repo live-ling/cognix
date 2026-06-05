@@ -43,24 +43,56 @@ export function PracticeSetup() {
     if (!selectedBank) return;
     setStarting(true);
     setError(null);
-    // Fetch questions for practice
-    const { data: questions, error: qErr } = await supabase
-      .from('questions')
-      .select('id, type, content, options')
-      .eq('bank_id', selectedBank)
-      .limit(count);
-    if (qErr) { setError(qErr.message); setStarting(false); return; }
+
+    let questions: any[] = [];
+
+    if (mode === 'mistake') {
+      // Fetch mistake questions for this bank
+      const { data: mistakes, error: mErr } = await supabase
+        .from('mistakes')
+        .select('question_id, question:questions(id, type, content, options)')
+        .eq('is_mastered', false)
+        .limit(count);
+      if (mErr) { setError(mErr.message); setStarting(false); return; }
+      questions = (mistakes || [])
+        .map((m: any) => m.question)
+        .filter((q: any) => q && q.id);
+    } else {
+      // Fetch regular questions
+      const { data, error: qErr } = await supabase
+        .from('questions')
+        .select('id, type, content, options')
+        .eq('bank_id', selectedBank)
+        .limit(count);
+      if (qErr) { setError(qErr.message); setStarting(false); return; }
+      questions = data || [];
+    }
+
+    // Shuffle for random mode
+    if (mode === 'random') {
+      for (let i = questions.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [questions[i], questions[j]] = [questions[j], questions[i]];
+      }
+    }
+
+    if (questions.length === 0) {
+      setError(mode === 'mistake' ? '没有未掌握的错题' : '题库中没有题目');
+      setStarting(false);
+      return;
+    }
+
     // Create practice session
     const { data: session, error: sErr } = await supabase
       .from('practice_sessions')
-      .insert({ bank_id: selectedBank, mode, total_count: questions?.length || 0 })
+      .insert({ bank_id: selectedBank, mode, total_count: questions.length })
       .select('id')
       .single();
     if (sErr) { setError(sErr.message); setStarting(false); return; }
     navigate('/practice/session', {
       state: {
         session_id: session.id,
-        questions: (questions || []).map((q: any, i: number) => ({
+        questions: questions.map((q: any, i: number) => ({
           id: q.id,
           type: q.type === 'SINGLE' ? 'single' : q.type === 'MULTIPLE' ? 'multiple' : 'judgement',
           stem: q.content,
@@ -75,18 +107,17 @@ export function PracticeSetup() {
   const modes = [
     { value: 'sequential', label: '顺序练习', icon: BookOpen, desc: '按题库顺序依次答题' },
     { value: 'random', label: '随机练习', icon: Shuffle, desc: '随机抽取题目进行练习' },
-    { value: 'mistakes', label: '错题练习', icon: Sparkles, desc: '针对错题进行强化训练' },
+    { value: 'mistake', label: '错题练习', icon: Sparkles, desc: '针对错题进行强化训练' },
   ];
 
   if (loading) {
     return (
-      <div className="page-container max-w-2xl">
+      <div className="page-container max-w-4xl">
         <Skeleton type="title" width="40%" className="mb-2" />
         <Skeleton type="text" className="mb-6" />
-        <div className="space-y-4">
-          {[...Array(3)].map((_, i) => (
-            <Card key={i} className="p-4"><Skeleton type="text" /></Card>
-          ))}
+        <div className="grid lg:grid-cols-2 gap-6">
+          <Card className="p-4"><Skeleton type="text" /></Card>
+          <Card className="p-4"><Skeleton type="text" /></Card>
         </div>
       </div>
     );
@@ -94,7 +125,7 @@ export function PracticeSetup() {
 
   if (error && !banks.length) {
     return (
-      <div className="page-container max-w-2xl">
+      <div className="page-container max-w-4xl">
         <Card className="p-8 text-center">
           <p className="text-destructive font-medium">加载失败</p>
           <p className="text-muted-foreground text-sm mt-2 mb-4">{error}</p>
@@ -105,7 +136,7 @@ export function PracticeSetup() {
   }
 
   return (
-    <div className="page-container max-w-2xl">
+    <div className="page-container max-w-4xl">
       <h1 className="text-2xl font-bold mb-2">开始练习</h1>
       <p className="text-muted-foreground text-sm mb-6">选择题库和模式，开始你的刷题之旅</p>
 

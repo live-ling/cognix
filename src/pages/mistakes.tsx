@@ -26,13 +26,46 @@ export function Mistakes() {
     setLoading(true);
     setError(null);
     setSelectedIds(new Set());
-    let query = supabase.from('mistakes').select('*, question:questions(*, bank:banks(*))').order('last_wrong_at', { ascending: false });
-    if (filterBank) query = query.eq('question.bank_id', filterBank);
+
+    // Fetch mistakes with question details
+    let query = supabase
+      .from('mistakes')
+      .select('*, question:questions(id, type, content, options, answer, explanation, bank_id)')
+      .order('last_wrong_at', { ascending: false });
+
     if (filterMastered === 'true') query = query.eq('is_mastered', true);
     else if (filterMastered === 'false') query = query.eq('is_mastered', false);
-    const [{ data: m, error: err1 }, { data: b }] = await Promise.all([query, supabase.from('banks').select('*').order('created_at', { ascending: false })]);
+
+    const [{ data: m, error: err1 }, { data: b }] = await Promise.all([
+      query,
+      supabase.from('banks').select('*').order('created_at', { ascending: false }),
+    ]);
+
     if (err1) setError(err1.message);
-    setMistakes((m || []) as Mistake[]);
+
+    // Map raw DB fields to frontend types
+    const mapped = (m || []).map((row: any) => {
+      const q = row.question;
+      return {
+        ...row,
+        bank_id: q?.bank_id,
+        question: q ? {
+          id: q.id,
+          type: q.type === 'SINGLE' ? 'single' : q.type === 'MULTIPLE' ? 'multiple' : 'judgement',
+          stem: q.content || '',
+          options: q.options || [],
+          answers: q.type === 'MULTIPLE' ? (q.answer || '').split('') : [q.answer || ''],
+          analysis: q.explanation,
+        } : undefined,
+      };
+    });
+
+    // Apply bank filter client-side
+    const filtered = filterBank
+      ? mapped.filter((m: any) => m.bank_id === filterBank)
+      : mapped;
+
+    setMistakes(filtered as Mistake[]);
     setBanks((b || []) as Bank[]);
     setLoading(false);
   };

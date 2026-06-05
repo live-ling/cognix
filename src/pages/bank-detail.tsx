@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Plus, Pencil, Trash2, BookOpen,
   Upload, Sparkles, Loader2, CheckCircle2, FileText, X,
+  CheckSquare, Square, MinusSquare,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { trackAiUsage } from '@/lib/ai-tracker';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { supabase } from '@/lib/supabase';
@@ -34,6 +36,11 @@ const SYSTEM_PROMPT = `你是一个专业的题目解析助手。你需要将文
 - 已有题目提取全部，题型与原文一致，答案以原文为准
 - 只返回 JSON 数组，不要其他文字`;
 
+/** Strip letter prefix from option text: "A. 10" → "10", "B. undefined" → "undefined" */
+function stripOptionPrefix(opt: string): string {
+  return opt.replace(/^[A-Fa-f]\.\s*/, '').trim();
+}
+
 function parseAIJson(content: string): any[] {
   content = content.trim();
   if (content.startsWith('```')) {
@@ -44,11 +51,11 @@ function parseAIJson(content: string): any[] {
     const s = content.indexOf('['), e = content.lastIndexOf(']');
     if (s !== -1 && e !== -1) { try { arr = JSON.parse(content.slice(s, e + 1)); } catch {} }
   }
-  // Normalize field names (AI may return "question" instead of "stem")
+  // Normalize field names and strip option prefixes
   return arr.map((q: any) => ({
     stem: q.stem || q.question || '',
     type: q.type || 'single',
-    options: q.options || [],
+    options: (q.options || []).map(stripOptionPrefix),
     answers: q.answers || [],
     analysis: q.analysis || q.explanation || '',
     difficulty: q.difficulty || 'medium',
@@ -57,6 +64,7 @@ function parseAIJson(content: string): any[] {
 
 export function BankDetail() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { user } = useSupabaseAuth();
   const [bank, setBank] = useState<Bank | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -66,6 +74,16 @@ export function BankDetail() {
   const [typeFilter, setTypeFilter] = useState('');
   const [difficultyFilter, setDifficultyFilter] = useState('');
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  // Batch selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchLoading, setBatchLoading] = useState(false);
+
+  // Bank edit/delete
+  const [editingBank, setEditingBank] = useState(false);
+  const [editBankName, setEditBankName] = useState('');
+  const [editBankDesc, setEditBankDesc] = useState('');
+  const [deleteBankConfirm, setDeleteBankConfirm] = useState(false);
 
   // AI Import state
   const [importStep, setImportStep] = useState<'mode' | 'input' | 'configure' | 'review' | 'result' | null>(null);
@@ -103,6 +121,47 @@ export function BankDetail() {
     else { setDeleteId(null); fetchData(); }
   };
 
+  // Batch selection
+  const toggleSelect = (qid: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(qid)) next.delete(qid); else next.add(qid);
+      return next;
+    });
+  };
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredQuestions.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredQuestions.map((q) => q.id)));
+    }
+  };
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`确定删除选中的 ${selectedIds.size} 道题目？`)) return;
+    setBatchLoading(true);
+    const { error } = await supabase.from('questions').delete().in('id', Array.from(selectedIds));
+    if (error) alert(error.message);
+    else { setSelectedIds(new Set()); fetchData(); }
+    setBatchLoading(false);
+  };
+
+  // Bank edit
+  const handleSaveBank = async () => {
+    if (!editBankName.trim() || !id) return;
+    const { error } = await supabase.from('banks').update({ title: editBankName.trim(), description: editBankDesc.trim() }).eq('id', id);
+    if (error) alert(error.message);
+    else { setEditingBank(false); fetchData(); }
+  };
+
+  // Bank delete
+  const handleDeleteBank = async () => {
+    if (!id) return;
+    const { error } = await supabase.from('banks').delete().eq('id', id);
+    if (error) alert(error.message);
+    else navigate('/banks');
+  };
+
   // AI Import handlers
   const resetImport = () => {
     setImportStep(null);
@@ -129,6 +188,8 @@ export function BankDetail() {
       setUploadResult({ file_id: '', filename: file.name, preview: text.slice(0, 500), char_count: text.length });
       setPasteText(text);
       setUploading(false);
+      // Switch to paste tab to show parsed content
+      setInputMode('paste');
       if (isQuestionsMode) {
         doGenerate(text);
       } else {
@@ -183,6 +244,7 @@ export function BankDetail() {
       });
       if (!res.ok) throw new Error(`AI API 错误: ${res.status}`);
       const data = await res.json();
+      trackAiUsage('generate_questions', data, user.ai_model);
       const content = data?.choices?.[0]?.message?.content || '';
       const questions = parseAIJson(content);
       setGeneratedQuestions(questions);
@@ -269,13 +331,41 @@ export function BankDetail() {
 
       {/* Bank Info */}
       <div className="section-header">
-        <div>
-          <h1 className="text-2xl font-bold">{bank.name}</h1>
-          {bank.description && (
-            <p className="text-muted-foreground text-sm mt-1">{bank.description}</p>
+        <div className="min-w-0 flex-1">
+          {editingBank ? (
+            <div className="space-y-2 max-w-md">
+              <Input
+                value={editBankName}
+                onChange={(e) => setEditBankName(e.target.value)}
+                placeholder="题库名称"
+                autoFocus
+              />
+              <Input
+                value={editBankDesc}
+                onChange={(e) => setEditBankDesc(e.target.value)}
+                placeholder="题库描述（可选）"
+              />
+              <div className="flex gap-2">
+                <Button size="sm" onClick={handleSaveBank}>保存</Button>
+                <Button size="sm" variant="ghost" onClick={() => setEditingBank(false)}>取消</Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <h1 className="text-2xl font-bold">{bank.name}</h1>
+              {bank.description && (
+                <p className="text-muted-foreground text-sm mt-1">{bank.description}</p>
+              )}
+            </>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-shrink-0">
+          <Button variant="outline" size="sm" onClick={() => { setEditingBank(true); setEditBankName(bank.name); setEditBankDesc(bank.description || ''); }}>
+            <Pencil className="h-3.5 w-3.5" /> 编辑
+          </Button>
+          <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={() => setDeleteBankConfirm(true)}>
+            <Trash2 className="h-3.5 w-3.5" /> 删除
+          </Button>
           <Button variant="outline" onClick={openImport} disabled={!user?.ai_configured} title={!user?.ai_configured ? '请先在个人主页配置 AI 设置' : ''}>
             <Sparkles className="h-4 w-4" /> AI 导入
           </Button>
@@ -303,8 +393,8 @@ export function BankDetail() {
         </div>
       </Card>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3">
+      {/* Filters + Batch Actions */}
+      <div className="flex flex-wrap items-center gap-3">
         <Input
           className="max-w-xs"
           placeholder="搜索题干..."
@@ -324,6 +414,12 @@ export function BankDetail() {
             ))}
           </select>
         ))}
+        {selectedIds.size > 0 && (
+          <Button variant="destructive" size="sm" onClick={handleBatchDelete} disabled={batchLoading}>
+            {batchLoading ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Trash2 className="h-3.5 w-3.5 mr-1" />}
+            删除选中 ({selectedIds.size})
+          </Button>
+        )}
       </div>
 
       {/* Question Table */}
@@ -343,6 +439,15 @@ export function BankDetail() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border">
+                    <th className="py-3 px-4 w-10">
+                      <button type="button" onClick={toggleSelectAll} className="text-muted-foreground hover:text-foreground" aria-label="全选">
+                        {selectedIds.size === filteredQuestions.length && filteredQuestions.length > 0
+                          ? <CheckSquare className="h-4 w-4" />
+                          : selectedIds.size > 0
+                            ? <MinusSquare className="h-4 w-4" />
+                            : <Square className="h-4 w-4" />}
+                      </button>
+                    </th>
                     <th className="text-left py-3 px-4 font-medium text-muted-foreground w-12">#</th>
                     <th className="text-left py-3 px-4 font-medium text-muted-foreground">题干</th>
                     <th className="text-left py-3 px-4 font-medium text-muted-foreground">题型</th>
@@ -352,7 +457,20 @@ export function BankDetail() {
                 </thead>
                 <tbody>
                   {filteredQuestions.map((q, i) => (
-                    <tr key={q.id} className="border-b border-border/50 hover:bg-accent/50 transition-colors">
+                    <tr
+                      key={q.id}
+                      className="border-b border-border/50 hover:bg-accent/50 transition-colors cursor-pointer"
+                      onClick={(e) => {
+                        // Don't navigate if clicking checkbox or action buttons
+                        if ((e.target as HTMLElement).closest('button, a')) return;
+                        navigate(`/banks/${id}/questions/${q.id}/edit`);
+                      }}
+                    >
+                      <td className="py-2.5 px-4">
+                        <button type="button" onClick={() => toggleSelect(q.id)} className="text-muted-foreground hover:text-foreground" aria-label={selectedIds.has(q.id) ? '取消选择' : '选择'}>
+                          {selectedIds.has(q.id) ? <CheckSquare className="h-4 w-4 text-primary" /> : <Square className="h-4 w-4" />}
+                        </button>
+                      </td>
                       <td className="py-2.5 px-4 text-muted-foreground">{i + 1}</td>
                       <td className="py-2.5 px-4 max-w-xs truncate">{q.stem}</td>
                       <td className="py-2.5 px-4">
@@ -634,6 +752,8 @@ export function BankDetail() {
                         <span className="text-xs text-muted-foreground">答案: </span>
                         <input
                           className="flex-1 text-xs bg-transparent border-b border-border/50 focus:border-primary outline-none pb-0.5"
+                          placeholder="答案"
+                          aria-label={`题目 ${i + 1} 答案`}
                           value={Array.isArray(q.answers) ? q.answers.join(', ') : q.answers}
                           onChange={(e) => updateQuestion(i, 'answers', e.target.value.split(',').map((s: string) => s.trim()).filter(Boolean))}
                         />
@@ -683,7 +803,7 @@ export function BankDetail() {
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* Delete Question Confirmation Modal */}
       {deleteId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setDeleteId(null)}>
           <Card className="w-full max-w-sm mx-4 p-6" onClick={(e) => e.stopPropagation()}>
@@ -692,6 +812,21 @@ export function BankDetail() {
             <div className="flex justify-end gap-3">
               <Button variant="outline" onClick={() => setDeleteId(null)}>取消</Button>
               <Button variant="destructive" onClick={handleDelete}>删除</Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Delete Bank Confirmation Modal */}
+      {deleteBankConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setDeleteBankConfirm(false)}>
+          <Card className="w-full max-w-sm mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-semibold mb-2">删除题库</h2>
+            <p className="text-sm text-muted-foreground mb-2">确定要删除题库「{bank.name}」吗？</p>
+            <p className="text-xs text-destructive mb-6">此操作将同时删除该题库下的所有 {questions.length} 道题目，不可撤销。</p>
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setDeleteBankConfirm(false)}>取消</Button>
+              <Button variant="destructive" onClick={handleDeleteBank}>删除题库</Button>
             </div>
           </Card>
         </div>

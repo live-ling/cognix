@@ -68,13 +68,14 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
+    // Get initial session — wait for profile before setting loading=false
+    supabase.auth.getSession().then(async ({ data: { session: s } }) => {
       setSession(s);
       if (s) {
-        fetchProfile(s.user.id).then((profile) => {
-          setUser(buildUser(s, profile));
-        });
+        const profile = await fetchProfile(s.user.id);
+        setUser(buildUser(s, profile));
+      } else {
+        setUser(null);
       }
       setLoading(false);
     });

@@ -206,7 +206,7 @@ export function PracticeSession() {
   // Not initialized
   if (!state || questions.length === 0) {
     return (
-      <div className="page-container max-w-2xl">
+      <div className="page-container max-w-3xl">
         <Card className="p-8 text-center">
           <p className="text-muted-foreground">会话数据丢失，请重新开始练习</p>
           <Button variant="outline" className="mt-4" onClick={() => navigate('/practice')}>
@@ -225,7 +225,7 @@ export function PracticeSession() {
     const accuracy = total > 0 ? (correct / total) * 100 : 0;
 
     return (
-      <div className="page-container max-w-3xl">
+      <div className="page-container max-w-4xl">
         <h1 className="text-2xl font-bold mb-6">练习结果</h1>
 
         {/* Stats */}
@@ -263,7 +263,7 @@ export function PracticeSession() {
                     {detail.questions.map((q: any, i: number) => (
                       <tr key={i} className="border-b border-border/50 hover:bg-accent/50 transition-colors">
                         <td className="py-2 px-3 text-muted-foreground">{i + 1}</td>
-                        <td className="py-2 px-3 max-w-xs truncate">{q.stem}</td>
+                        <td className="py-2 px-3 max-w-md truncate">{q.stem}</td>
                         <td className="py-2 px-3">{q.user_answer || '-'}</td>
                         <td className="py-2 px-3">
                           <Badge variant={q.is_correct ? 'success' : 'destructive'}>
@@ -302,7 +302,7 @@ export function PracticeSession() {
 
   // Question screen
   return (
-    <div className="page-container max-w-2xl">
+    <div className="page-container max-w-3xl">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-lg font-semibold">

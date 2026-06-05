@@ -52,6 +52,15 @@
     font-family: "Inter", system-ui, -apple-system, sans-serif;
     margin: 0;
   }
+
+  /* Hide scrollbar on all elements */
+  * {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE/Edge */
+  }
+  *::-webkit-scrollbar {
+    display: none; /* Chrome/Safari */
+  }
 }
 
 @layer components {
@@ -232,6 +241,13 @@
 
   .action-link:hover {
     text-decoration: underline;
+  }
+
+  /* ===== Profile banner ===== */
+  .profile-banner {
+    background-image: url('/cognix-profile_back.png');
+    background-size: cover;
+    background-position: center;
   }
 
   /* ===== Practice range slider ===== */

@@ -1,12 +1,14 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import Cropper from 'react-easy-crop';
+import { trackAiUsage } from '@/lib/ai-tracker';
 import {
   User, Edit3, Save, X, Upload, Camera,
   BarChart3, Star, Award, Settings, Plug, Lock,
   CheckCircle, XCircle, Loader2, Eye, EyeOff,
   BookOpen, Clock, Flame, Target, TrendingUp, Zap,
+  RotateCcw,
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -68,6 +70,14 @@ export function Profile() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
+  // Crop state
+  const [cropModalOpen, setCropModalOpen] = useState(false);
+  const [cropImage, setCropImage] = useState<string | null>(null);
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<any>(null);
+  const [croppingFile, setCroppingFile] = useState<File | null>(null);
+
   // Password modal
   const [pwdModalOpen, setPwdModalOpen] = useState(false);
   const [oldPassword, setOldPassword] = useState('');
@@ -88,6 +98,10 @@ export function Profile() {
   const [aiSaving, setAiSaving] = useState(false);
   const [aiError, setAiError] = useState('');
   const [aiTesting, setAiTesting] = useState(false);
+
+  // AI usage stats
+  const [aiStats, setAiStats] = useState<any>(null);
+  const [deepSeekBalance, setDeepSeekBalance] = useState<number | null>(null);
   const [aiTestPassed, setAiTestPassed] = useState(false);
   const [aiTestResult, setAiTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [customBaseUrl, setCustomBaseUrl] = useState('');
@@ -105,7 +119,96 @@ export function Profile() {
   useEffect(() => {
     if (stats) { setLoading(false); return; }
     fetchStats();
+    fetchAiStats();
   }, []);
+
+  // Fetch DeepSeek balance when user is available
+  useEffect(() => {
+    if (user?.ai_configured && user.ai_base_url?.includes('deepseek')) {
+      fetchDeepSeekBalance();
+    }
+  }, [user?.ai_configured, user?.ai_base_url, user?.ai_api_key]);
+
+  const fetchAiStats = async () => {
+    // Try RPC first
+    const { data: rpcData, error: rpcError } = await supabase.rpc('get_ai_usage_stats');
+    if (!rpcError && rpcData) {
+      setAiStats(rpcData);
+      return;
+    }
+
+    console.log('RPC failed, falling back to direct query:', rpcError?.message);
+
+    // Fallback: query the table directly
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+
+      // First check if table exists and has data
+      const { count: totalCount, error: countError } = await supabase
+        .from('ai_usage_logs')
+        .select('*', { count: 'exact', head: true });
+
+      console.log('ai_usage_logs total count:', totalCount, 'error:', countError?.message);
+
+      if (countError) {
+        // Table doesn't exist or RLS issue
+        setAiStats({ today_calls: 0, total_calls: 0, today_tokens: 0, total_tokens: 0, recent_logs: [], _error: countError.message });
+        return;
+      }
+
+      const [todayRes, recentRes] = await Promise.all([
+        supabase.from('ai_usage_logs').select('*', { count: 'exact', head: true }).gte('created_at', today),
+        supabase.from('ai_usage_logs').select('action, model, prompt_tokens, completion_tokens, total_tokens, created_at').order('created_at', { ascending: false }).limit(10),
+      ]);
+
+      // Get all tokens for sum
+      const { data: allTokens } = await supabase.from('ai_usage_logs').select('total_tokens, created_at');
+      const todayTokens = (allTokens || []).filter(r => r.created_at >= today);
+      const sumTokens = (rows: any[]) => rows.reduce((s, r) => s + (r.total_tokens || 0), 0);
+
+      setAiStats({
+        today_calls: todayRes.count ?? 0,
+        total_calls: totalCount ?? 0,
+        today_tokens: sumTokens(todayTokens),
+        total_tokens: sumTokens(allTokens || []),
+        recent_logs: (recentRes.data || []).map((r: any) => ({
+          action: r.action,
+          model: r.model,
+          total_tokens: r.total_tokens,
+          created_at: r.created_at?.slice(0, 16).replace('T', ' '),
+        })),
+      });
+    } catch (e: any) {
+      console.error('fetchAiStats error:', e);
+      setAiStats({ today_calls: 0, total_calls: 0, today_tokens: 0, total_tokens: 0, recent_logs: [], _error: e.message });
+    }
+  };
+
+  const fetchDeepSeekBalance = async () => {
+    if (!user?.ai_api_key) { setDeepSeekBalance(-1); return; }
+    try {
+      const res = await fetch('https://api.deepseek.com/user/balance', {
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${user.ai_api_key}`,
+        },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // DeepSeek response: { is_available, balance_infos: [{ currency, total_balance, granted_balance, topped_up_balance }] }
+        const total = data?.balance_infos?.[0]?.total_balance;
+        if (total != null) {
+          setDeepSeekBalance(parseFloat(total));
+        } else {
+          setDeepSeekBalance(-1);
+        }
+      } else {
+        setDeepSeekBalance(-1);
+      }
+    } catch {
+      setDeepSeekBalance(-1);
+    }
+  };
 
   const getLevel = () => {
     const total = stats?.total_questions ?? 0;
@@ -129,12 +232,60 @@ export function Profile() {
     setEditModalOpen(true);
   };
 
-  const handleAvatarUpload = async (file: File) => {
-    if (!user) return;
+  const handleQqAvatar = () => {
+    if (!editQqNumber.trim()) { setEditError('请输入 QQ 号'); return; }
+    const url = `https://q.qlogo.cn/g?b=qq&nk=${editQqNumber.trim()}&s=100`;
+    setEditAvatarUrl(url);
+    setEditAvatarPreview(url);
+    setEditError('');
+  };
+
+  // ===== Crop helpers =====
+  const onCropComplete = useCallback((_: any, areaPixels: any) => {
+    setCroppedAreaPixels(areaPixels);
+  }, []);
+
+  const createCroppedImage = async (imageSrc: string, pixelCrop: any): Promise<Blob> => {
+    const image = new Image();
+    image.src = imageSrc;
+    await new Promise((resolve) => { image.onload = resolve; });
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d')!;
+    canvas.width = pixelCrop.width;
+    canvas.height = pixelCrop.height;
+
+    ctx.drawImage(
+      image,
+      pixelCrop.x, pixelCrop.y, pixelCrop.width, pixelCrop.height,
+      0, 0, pixelCrop.width, pixelCrop.height,
+    );
+
+    return new Promise((resolve) => {
+      canvas.toBlob((blob) => resolve(blob!), 'image/jpeg', 0.9);
+    });
+  };
+
+  const handleFileSelect = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCropImage(reader.result as string);
+      setCroppingFile(file);
+      setCrop({ x: 0, y: 0 });
+      setZoom(1);
+      setCropModalOpen(true);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleCropConfirm = async () => {
+    if (!cropImage || !croppedAreaPixels || !croppingFile || !user) return;
+    setCropModalOpen(false);
     setUploadingAvatar(true);
     setEditError('');
     try {
-      const ext = file.name.split('.').pop() || 'jpg';
+      const croppedBlob = await createCroppedImage(cropImage, croppedAreaPixels);
+      const ext = croppingFile.name.split('.').pop() || 'jpg';
       const path = `${user.id}/avatar.${ext}`;
 
       // Delete old avatar if exists
@@ -145,7 +296,8 @@ export function Profile() {
         }
       }
 
-      const { error: uploadError } = await supabase.storage.from('avatars').upload(path, file, { upsert: true });
+      const croppedFile = new File([croppedBlob], croppingFile.name, { type: 'image/jpeg' });
+      const { error: uploadError } = await supabase.storage.from('avatars').upload(path, croppedFile, { upsert: true });
       if (uploadError) throw new Error(uploadError.message);
 
       const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path);
@@ -155,15 +307,9 @@ export function Profile() {
       setEditError(err.message || '上传失败');
     } finally {
       setUploadingAvatar(false);
+      setCropImage(null);
+      setCroppingFile(null);
     }
-  };
-
-  const handleQqAvatar = () => {
-    if (!editQqNumber.trim()) { setEditError('请输入 QQ 号'); return; }
-    const url = `https://q.qlogo.cn/g?b=qq&nk=${editQqNumber.trim()}&s=100`;
-    setEditAvatarUrl(url);
-    setEditAvatarPreview(url);
-    setEditError('');
   };
 
   const handleSaveProfile = async () => {
@@ -281,6 +427,7 @@ export function Profile() {
         setAiTestResult({ success: false, message: `API 错误: ${res.status} ${txt.slice(0, 100)}` });
       } else {
         const data = await res.json();
+        trackAiUsage('test_connection', data, aiModel.trim());
         const msg = data?.choices?.[0]?.message || {};
         const reply = msg?.content || msg?.reasoning_content || '';
         setAiTestResult({ success: true, message: reply ? `连接成功！模型回复: ${reply.slice(0, 50)}` : '连接成功！API 响应正常' });
@@ -314,133 +461,97 @@ export function Profile() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* ===== Banner: full width, 40vh ===== */}
-      <div className="relative w-full h-[40vh] min-h-[280px] bg-gradient-to-r from-primary/10 via-primary/5 to-background overflow-hidden">
+      {/* ===== Banner ===== */}
+      <div className="relative w-full h-[50vh] min-h-[360px] overflow-hidden profile-banner">
+        <div className="absolute inset-0 bg-background/60" />
         <div className="absolute -top-20 -right-20 w-72 h-72 bg-primary/5 rounded-full blur-3xl" />
         <div className="absolute bottom-0 left-1/4 w-40 h-40 bg-primary/10 rounded-full blur-2xl" />
         <div className="absolute top-1/3 right-1/3 w-24 h-24 bg-primary/5 rounded-full blur-xl" />
 
-        <div className="relative h-full max-w-[1200px] mx-auto px-6 flex items-center gap-6">
-          <div className="relative">
-            <UserAvatar name={user.name} email={user.email} avatarUrl={user.avatar_url} size="xl" />
-            <button
-              type="button"
-              onClick={openEditModal}
-              className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-background border border-border flex items-center justify-center hover:bg-accent transition-colors"
-              title="编辑资料"
-            >
-              <Camera className="h-3.5 w-3.5" />
-            </button>
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <h1 className="text-3xl font-bold">{user.name}</h1>
-              <Button
-                size="icon" variant="ghost"
-                className="h-7 w-7 opacity-60 hover:opacity-100"
-                onClick={openEditModal}
-              >
-                <Edit3 className="h-3.5 w-3.5" />
-              </Button>
+        {/* User info — left aligned, level badge right aligned */}
+        <div className="relative h-full flex items-center">
+          <div className="w-full max-w-[1200px] mx-auto px-6 flex items-center justify-between">
+            <div className="flex items-center gap-5">
+              <div className="relative">
+                <UserAvatar name={user.name} email={user.email} avatarUrl={user.avatar_url} size="xl" />
+                <button
+                  type="button"
+                  onClick={openEditModal}
+                  className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-background border border-border flex items-center justify-center hover:bg-accent transition-colors"
+                  title="编辑资料"
+                >
+                  <Camera className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <h1 className="text-3xl font-bold">{user.name}</h1>
+                  <Button size="icon" variant="ghost" className="h-7 w-7 opacity-60 hover:opacity-100" onClick={openEditModal}>
+                    <Edit3 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+                <p className="text-sm text-muted-foreground mb-2 max-w-md">{user.bio || '暂无个人简介'}</p>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="text-xs">ID: {user.id.slice(0, 8)}</Badge>
+                  {user.created_at && (
+                    <Badge variant="outline" className="text-xs">注册于 {new Date(user.created_at).toLocaleDateString('zh-CN')}</Badge>
+                  )}
+                </div>
+              </div>
             </div>
-
-            <p className="text-sm text-muted-foreground mb-2 max-w-md">
-              {user.bio || '暂无个人简介'}
-            </p>
-
-            <div className="flex items-center gap-2">
-              <Badge variant="secondary" className="text-xs">ID: {user.id.slice(0, 8)}</Badge>
-              {user.created_at && (
-                <Badge variant="outline" className="text-xs">
-                  注册于 {new Date(user.created_at).toLocaleDateString('zh-CN')}
-                </Badge>
-              )}
+            <div className={`hidden sm:flex flex-shrink-0 items-center gap-2 px-4 py-2.5 rounded-lg ${level.color}`}>
+              <LevelIcon className="h-5 w-5" />
+              <span className="font-semibold text-sm">{level.name}</span>
             </div>
-          </div>
-
-          <div className={`hidden sm:flex flex-shrink-0 items-center gap-2 px-4 py-2.5 rounded-lg ${level.color} ml-auto`}>
-            <LevelIcon className="h-5 w-5" />
-            <span className="font-semibold text-sm">{level.name}</span>
           </div>
         </div>
       </div>
 
       {/* ===== Main Content ===== */}
-      <div className="max-w-[1200px] mx-auto px-6 py-6">
+      <div className="max-w-[1200px] mx-auto px-6 py-6 space-y-6">
 
-      {/* ===== Quick Stats ===== */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="p-4 hover-lift">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-blue-500/10 flex items-center justify-center">
-              <BookOpen className="h-4 w-4 text-blue-500" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{stats?.today_answered ?? 0}</p>
-              <p className="text-xs text-muted-foreground">今日答题</p>
-            </div>
+        {/* Stats card */}
+        <div className="glass-card rounded-xl p-5">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {[
+              { icon: BookOpen, color: 'text-blue-500', bg: 'bg-blue-500/10', value: stats?.today_answered ?? 0, label: '今日答题' },
+              { icon: CheckCircle, color: 'text-green-500', bg: 'bg-green-500/10', value: stats?.accuracy != null ? `${(stats.accuracy * 100).toFixed(0)}%` : '0%', label: '正确率' },
+              { icon: Flame, color: 'text-orange-500', bg: 'bg-orange-500/10', value: `${stats?.streak_days ?? 0} 天`, label: '连续学习' },
+              { icon: Target, color: 'text-purple-500', bg: 'bg-purple-500/10', value: stats?.bank_count ?? 0, label: '题库总数' },
+            ].map(({ icon: Icon, color, bg, value, label }) => (
+              <div key={label} className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-lg ${bg} flex items-center justify-center flex-shrink-0`}>
+                  <Icon className={`h-5 w-5 ${color}`} />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">{value}</p>
+                  <p className="text-xs text-muted-foreground">{label}</p>
+                </div>
+              </div>
+            ))}
           </div>
-        </Card>
-        <Card className="p-4 hover-lift">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-green-500/10 flex items-center justify-center">
-              <CheckCircle className="h-4 w-4 text-green-500" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">
-                {stats?.accuracy != null ? `${(stats.accuracy * 100).toFixed(0)}%` : '0%'}
-              </p>
-              <p className="text-xs text-muted-foreground">正确率</p>
-            </div>
-          </div>
-        </Card>
-        <Card className="p-4 hover-lift">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-orange-500/10 flex items-center justify-center">
-              <Flame className="h-4 w-4 text-orange-500" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{stats?.streak_days ?? 0} 天</p>
-              <p className="text-xs text-muted-foreground">连续学习</p>
-            </div>
-          </div>
-        </Card>
-        <Card className="p-4 hover-lift">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-purple-500/10 flex items-center justify-center">
-              <Target className="h-4 w-4 text-purple-500" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{stats?.bank_count ?? 0}</p>
-              <p className="text-xs text-muted-foreground">题库总数</p>
-            </div>
-          </div>
-        </Card>
-      </div>
+        </div>
 
-      {/* ===== Two-column ===== */}
-      <div className="grid lg:grid-cols-3 gap-6">
-        {/* Left */}
-        <div className="lg:col-span-2 space-y-6">
-          <Card>
-            <CardHeader className="section-header"><CardTitle>学习热力图</CardTitle></CardHeader>
-            <CardContent>
+        {/* Two-column: heatmap + sessions | actions + overview */}
+        <div className="grid lg:grid-cols-3 gap-6">
+          {/* Left */}
+          <div className="lg:col-span-2 space-y-6">
+            <div className="glass-card rounded-xl p-5">
+              <h3 className="font-semibold mb-4">学习热力图</h3>
               {loading ? <Skeleton type="text" className="h-32" /> : <HeatmapGrid data={stats?.heatmap} />}
-            </CardContent>
-          </Card>
+            </div>
 
-          <Card>
-            <CardHeader className="section-header">
-              <CardTitle>最近练习记录</CardTitle>
-              <Link to="/practice" className="action-link">更多 →</Link>
-            </CardHeader>
-            <CardContent>
+            <div className="glass-card rounded-xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold">最近练习记录</h3>
+                <Link to="/practice" className="text-xs text-primary hover:underline">更多 →</Link>
+              </div>
               {loading ? <Skeleton type="text" className="h-24" /> :
                stats?.recent_sessions && stats.recent_sessions.length > 0 ? (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-border">
+                      <tr className="border-b border-border/50">
                         <th className="text-left py-2 px-3 font-medium text-muted-foreground">日期</th>
                         <th className="text-left py-2 px-3 font-medium text-muted-foreground">模式</th>
                         <th className="text-left py-2 px-3 font-medium text-muted-foreground">正确率</th>
@@ -449,7 +560,7 @@ export function Profile() {
                     </thead>
                     <tbody>
                       {stats.recent_sessions.map((s, i) => (
-                        <tr key={i} className="border-b border-border/50 hover:bg-accent/50 transition-colors">
+                        <tr key={i} className="border-b border-border/30 hover:bg-accent/30 transition-colors">
                           <td className="py-2 px-3">{s.date}</td>
                           <td className="py-2 px-3 capitalize">{s.mode ?? '-'}</td>
                           <td className="py-2 px-3">
@@ -466,103 +577,150 @@ export function Profile() {
               ) : (
                 <p className="text-sm text-muted-foreground py-4 text-center">暂无练习记录</p>
               )}
-            </CardContent>
-          </Card>
-        </div>
+            </div>
 
-        {/* Right */}
-        <div className="space-y-6">
-          {/* Quick Actions */}
-          <Card>
-            <CardHeader><CardTitle className="text-base">快捷操作</CardTitle></CardHeader>
-            <CardContent className="space-y-2">
-              <Link to="/practice" className="flex items-center gap-2 p-3 rounded-md hover:bg-accent transition-colors group">
-                <Zap className="h-4 w-4 text-primary" />
-                <span className="text-sm font-medium group-hover:text-primary transition-colors">开始练习</span>
-              </Link>
-              <Link to="/banks" className="flex items-center gap-2 p-3 rounded-md hover:bg-accent transition-colors group">
-                <BookOpen className="h-4 w-4 text-primary" />
-                <span className="text-sm font-medium group-hover:text-primary transition-colors">管理题库</span>
-              </Link>
-              <Link to="/mistakes" className="flex items-center gap-2 p-3 rounded-md hover:bg-accent transition-colors group">
-                <TrendingUp className="h-4 w-4 text-primary" />
-                <span className="text-sm font-medium group-hover:text-primary transition-colors">错题复习</span>
-              </Link>
-              <button
-                type="button"
-                onClick={openPwdModal}
-                className="w-full flex items-center gap-2 p-3 rounded-md hover:bg-accent transition-colors group text-left"
-              >
-                <Lock className="h-4 w-4 text-primary" />
-                <span className="text-sm font-medium group-hover:text-primary transition-colors">修改密码</span>
-              </button>
-            </CardContent>
-          </Card>
+            {/* AI Usage Stats */}
+            <div className="glass-card rounded-xl p-5">
+              <h3 className="font-semibold mb-4">AI 调用统计</h3>
 
-          {/* Data Overview */}
-          <Card>
-            <CardHeader><CardTitle className="text-base">数据概览</CardTitle></CardHeader>
-            <CardContent className="space-y-1">
-              <div className="info-row">
-                <div className="info-row-icon"><FileTextIcon className="h-4 w-4" /></div>
-                <div className="info-row-content">
-                  <p className="info-row-label">总题目数</p>
-                  <p className="info-row-value">{stats?.total_questions ?? 0}</p>
+              {/* DeepSeek balance */}
+              {user.ai_configured && (user.ai_base_url || '').includes('deepseek') && (
+                <div className="mb-4 p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">DeepSeek 余额</span>
+                    <div className="flex items-center gap-2">
+                      {deepSeekBalance === null ? (
+                        <Loader2 className="h-4 w-4 text-muted-foreground animate-spin" />
+                      ) : deepSeekBalance >= 0 ? (
+                        <span className="text-sm font-bold text-primary">¥{deepSeekBalance.toFixed(2)}</span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">无法获取</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => { setDeepSeekBalance(null); fetchDeepSeekBalance(); }}
+                        className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                        title="刷新余额"
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Stats grid */}
+              <div className="grid grid-cols-4 gap-3 mb-4">
+                <div className="bg-muted/30 rounded-lg p-3 text-center">
+                  <p className="text-xl font-bold text-primary">{aiStats?.today_calls ?? 0}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">今日调用</p>
+                </div>
+                <div className="bg-muted/30 rounded-lg p-3 text-center">
+                  <p className="text-xl font-bold">{aiStats?.total_calls ?? 0}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">累计调用</p>
+                </div>
+                <div className="bg-muted/30 rounded-lg p-3 text-center">
+                  <p className="text-xl font-bold text-primary">{(aiStats?.today_tokens ?? 0).toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">今日 Token</p>
+                </div>
+                <div className="bg-muted/30 rounded-lg p-3 text-center">
+                  <p className="text-xl font-bold">{(aiStats?.total_tokens ?? 0).toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">累计 Token</p>
                 </div>
               </div>
-              <div className="info-row">
-                <div className="info-row-icon"><TrendingUp className="h-4 w-4" /></div>
-                <div className="info-row-content">
-                  <p className="info-row-label">平均正确率</p>
-                  <p className="info-row-value">
-                    {stats?.avg_accuracy != null ? `${(stats.avg_accuracy * 100).toFixed(1)}%` : '-'}
-                  </p>
-                </div>
-              </div>
-              <div className="info-row">
-                <div className="info-row-icon"><Clock className="h-4 w-4" /></div>
-                <div className="info-row-content">
-                  <p className="info-row-label">最长连续</p>
-                  <p className="info-row-value">{stats?.max_streak ?? 0} 天</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
 
-          {/* AI Settings */}
-          <Card>
-            <CardHeader className="border-b border-border">
-              <CardTitle className="flex items-center gap-2 text-base">
+              {/* Recent logs */}
+              {aiStats?.recent_logs?.length > 0 && (
+                <div className="border-t border-border/50 pt-3">
+                  <h4 className="text-xs font-medium text-muted-foreground mb-2">最近调用</h4>
+                  <div className="space-y-2">
+                    {aiStats.recent_logs.map((log: any, i: number) => (
+                      <div key={i} className="flex items-center justify-between text-xs bg-muted/20 rounded px-2 py-1.5">
+                        <span className="font-medium">{log.action}</span>
+                        <span className="text-muted-foreground">{log.model}</span>
+                        <span className="text-primary font-medium">{log.total_tokens}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right */}
+          <div className="space-y-6">
+            {/* Quick Actions + Data Overview merged */}
+            <div className="glass-card rounded-xl p-5">
+              <h3 className="font-semibold mb-4">快捷操作</h3>
+              <div className="grid grid-cols-2 gap-2 mb-5">
+                {[
+                  { to: '/practice', icon: Zap, label: '开始练习' },
+                  { to: '/banks', icon: BookOpen, label: '管理题库' },
+                  { to: '/mistakes', icon: TrendingUp, label: '错题复习' },
+                ].map(({ to, icon: Icon, label }) => (
+                  <Link key={to} to={to} className="flex items-center gap-2 p-2.5 rounded-lg hover:bg-accent/50 transition-colors group">
+                    <Icon className="h-4 w-4 text-primary" />
+                    <span className="text-sm font-medium group-hover:text-primary transition-colors">{label}</span>
+                  </Link>
+                ))}
+                <button
+                  type="button"
+                  onClick={openPwdModal}
+                  className="flex items-center gap-2 p-2.5 rounded-lg hover:bg-accent/50 transition-colors group text-left"
+                >
+                  <Lock className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-medium group-hover:text-primary transition-colors">修改密码</span>
+                </button>
+              </div>
+
+              <div className="border-t border-border/50 pt-4 space-y-3">
+                <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">数据概览</h4>
+                {[
+                  { icon: FileTextIcon, label: '总题目数', value: stats?.total_questions ?? 0 },
+                  { icon: TrendingUp, label: '平均正确率', value: stats?.avg_accuracy != null ? `${(stats.avg_accuracy * 100).toFixed(1)}%` : '-' },
+                  { icon: Clock, label: '最长连续', value: `${stats?.max_streak ?? 0} 天` },
+                ].map(({ icon: Icon, label, value }) => (
+                  <div key={label} className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-primary/5 flex items-center justify-center">
+                      <Icon className="h-3.5 w-3.5 text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-muted-foreground">{label}</p>
+                      <p className="text-sm font-medium truncate">{value}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* AI Settings */}
+            <div className="glass-card rounded-xl p-5">
+              <h3 className="font-semibold mb-3 flex items-center gap-2">
                 <Settings className="h-4 w-4" />AI 设置
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="py-4 space-y-3">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">状态</span>
-                {user.ai_configured ? (
-                  <Badge variant="success" className="text-xs"><CheckCircle className="h-3 w-3 mr-1" />已配置</Badge>
-                ) : (
-                  <Badge variant="warning" className="text-xs"><XCircle className="h-3 w-3 mr-1" />未配置</Badge>
-                )}
-              </div>
-              {user.ai_configured && (
-                <>
+              </h3>
+              <div className="space-y-2 mb-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">状态</span>
+                  {user.ai_configured ? (
+                    <Badge variant="success" className="text-xs"><CheckCircle className="h-3 w-3 mr-1" />已配置</Badge>
+                  ) : (
+                    <Badge variant="warning" className="text-xs"><XCircle className="h-3 w-3 mr-1" />未配置</Badge>
+                  )}
+                </div>
+                {user.ai_configured && (
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">模型</span>
                     <span className="text-xs">{user.ai_model || '-'}</span>
                   </div>
-                </>
-              )}
-              <div className="pt-1">
-                <Button variant="outline" size="sm" className="w-full" onClick={openAiModal}>
-                  <Plug className="h-3.5 w-3.5 mr-1" />
-                  {user.ai_configured ? '修改配置' : '配置 AI'}
-                </Button>
+                )}
               </div>
-            </CardContent>
-          </Card>
+              <Button variant="outline" size="sm" className="w-full" onClick={openAiModal}>
+                <Plug className="h-3.5 w-3.5 mr-1" />
+                {user.ai_configured ? '修改配置' : '配置 AI'}
+              </Button>
+            </div>
+          </div>
         </div>
-      </div>
       </div>
 
       {/* ===== Edit Profile Modal ===== */}
@@ -605,7 +763,7 @@ export function Profile() {
                   onClick={() => avatarInputRef.current?.click()}
                 >
                   <Upload className="h-6 w-6 mx-auto mb-1 text-muted-foreground" />
-                  <p className="text-xs text-muted-foreground">点击上传头像（最大 5MB）</p>
+                  <p className="text-xs text-muted-foreground">点击上传头像（支持裁切，最大 5MB）</p>
                 </div>
                 <input
                   ref={avatarInputRef}
@@ -616,7 +774,8 @@ export function Profile() {
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (file) handleAvatarUpload(file);
+                    if (file) handleFileSelect(file);
+                    e.target.value = '';
                   }}
                 />
               </div>
@@ -835,6 +994,61 @@ export function Profile() {
           )}
         </div>
       </Modal>
+
+      {/* ===== Crop Avatar Modal ===== */}
+      {cropModalOpen && cropImage && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60">
+          <div className="bg-background rounded-xl shadow-2xl border border-border w-full max-w-md mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+              <h2 className="text-lg font-semibold">裁切头像</h2>
+              <button
+                type="button"
+                onClick={() => { setCropModalOpen(false); setCropImage(null); setCroppingFile(null); }}
+                className="h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-accent transition-colors"
+                aria-label="关闭"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="px-6 py-4">
+              <div className="relative w-full aspect-square rounded-lg overflow-hidden bg-muted mb-4">
+                <Cropper
+                  image={cropImage}
+                  crop={crop}
+                  zoom={zoom}
+                  aspect={1}
+                  onCropChange={setCrop}
+                  onZoomChange={setZoom}
+                  onCropComplete={onCropComplete}
+                />
+              </div>
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-muted-foreground w-10">缩放</span>
+                  <input
+                    type="range"
+                    min={1}
+                    max={3}
+                    step={0.1}
+                    value={zoom}
+                    onChange={(e) => setZoom(Number(e.target.value))}
+                    className="flex-1 h-1.5 rounded-lg appearance-none cursor-pointer bg-muted"
+                    title="缩放"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" className="flex-1" onClick={() => { setCropModalOpen(false); setCropImage(null); setCroppingFile(null); }}>
+                    取消
+                  </Button>
+                  <Button className="flex-1" onClick={handleCropConfirm}>
+                    <CheckCircle className="h-4 w-4 mr-1" />确认裁切
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
