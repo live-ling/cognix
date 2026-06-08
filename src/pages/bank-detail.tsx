@@ -545,6 +545,7 @@ export function BankDetail() {
 
       {/* AI Import Modal */}
       {importStep && (
+        <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={resetImport}>
           <Card className="w-full max-w-lg mx-4 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             {/* Step 0: Choose mode */}
@@ -834,6 +835,7 @@ export function BankDetail() {
             )}
           </Card>
         </div>
+        </Portal>
       )}
 
       {/* Delete Question Confirmation Modal */}
