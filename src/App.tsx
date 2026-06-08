@@ -15,6 +15,7 @@ const PracticeSetup = lazy(() => import('./pages/practice-setup').then(m => ({ d
 const PracticeSession = lazy(() => import('./pages/practice-session').then(m => ({ default: m.PracticeSession })));
 const Mistakes = lazy(() => import('./pages/mistakes').then(m => ({ default: m.Mistakes })));
 const Profile = lazy(() => import('./pages/profile').then(m => ({ default: m.Profile })));
+const Square = lazy(() => import('./pages/square').then(m => ({ default: m.Square })));
 
 function PageLoader() {
   return (
@@ -40,6 +41,7 @@ function App() {
               {/* Routes with layout */}
               <Route element={<Layout />}>
                 <Route path="/" element={<Home />} />
+                <Route path="/square" element={<ProtectedRoute><Square /></ProtectedRoute>} />
                 <Route path="/dashboard" element={<Navigate to="/profile" replace />} />
                 <Route path="/banks" element={<ProtectedRoute><BankList /></ProtectedRoute>} />
                 <Route path="/banks/:id" element={<ProtectedRoute><BankDetail /></ProtectedRoute>} />

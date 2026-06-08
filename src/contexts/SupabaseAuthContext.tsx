@@ -16,12 +16,26 @@ export interface AppUser {
   created_at: string;
 }
 
+/** Result type for register() */
+export type RegisterResult =
+  | { success: true; user: AppUser }
+  | { success: false; needsVerification: true; email: string }
+  | { success: false; needsVerification: false; error: string };
+
 interface AuthContextType {
   user: AppUser | null;
   session: Session | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<AppUser>;
-  register: (name: string, email: string, password: string) => Promise<AppUser>;
+  /** Login with email or username — looks up email from profiles if a username is given */
+  loginByIdentifier: (identifier: string, password: string) => Promise<AppUser>;
+  register: (name: string, email: string, password: string) => Promise<RegisterResult>;
+  /** Verify registration email with OTP code */
+  verifyRegistrationOtp: (email: string, token: string) => Promise<AppUser>;
+  /** Send OTP code for password reset */
+  sendPasswordResetOtp: (email: string) => Promise<void>;
+  /** Verify OTP code for password reset (returns session for password update) */
+  verifyPasswordResetOtp: (email: string, token: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -68,7 +82,6 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    // Get initial session — wait for profile before setting loading=false
     supabase.auth.getSession().then(async ({ data: { session: s } }) => {
       setSession(s);
       if (s) {
@@ -80,7 +93,6 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     });
 
-    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, s) => {
       setSession(s);
       if (s) {
@@ -95,6 +107,7 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
+  // ===== Login with email =====
   const login = async (email: string, password: string): Promise<AppUser> => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw new Error(error.message === 'Invalid login credentials' ? '邮箱或密码错误' : error.message);
@@ -105,23 +118,119 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     return u;
   };
 
-  const register = async (name: string, email: string, password: string): Promise<AppUser> => {
+  // ===== Login with email OR username =====
+  const loginByIdentifier = async (identifier: string, password: string): Promise<AppUser> => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    let email = identifier.trim();
+
+    if (!emailRegex.test(email)) {
+      const { data: foundEmail, error: lookupError } = await supabase
+        .rpc('get_email_by_name', { p_name: email });
+
+      if (lookupError || !foundEmail) {
+        throw new Error('用户名不存在，请检查后重试');
+      }
+      email = foundEmail;
+    }
+
+    return login(email, password);
+  };
+
+  // ===== Register =====
+  const register = async (name: string, email: string, password: string): Promise<RegisterResult> => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: { data: { name } },
     });
     if (error) {
-      if (error.message.includes('already registered')) throw new Error('该邮箱已被注册');
-      throw new Error(error.message);
+      if (error.message.includes('already registered')) {
+        return { success: false, needsVerification: false, error: '该邮箱已被注册' };
+      }
+      if (error.message.includes('duplicate') || error.message.includes('unique')) {
+        return { success: false, needsVerification: false, error: '该用户名已被使用' };
+      }
+      return { success: false, needsVerification: false, error: error.message };
     }
-    // Profile is auto-created by trigger — but may not be ready immediately
+
+    // If email confirmation is required, session will be null — user needs to verify OTP
+    if (!data.session && data.user) {
+      return { success: false, needsVerification: true, email: data.user.email || email };
+    }
+
+    // Auto-login (email confirmation not required)
     await new Promise((r) => setTimeout(r, 500));
     const profile = await fetchProfile(data.user!.id);
     const u = buildUser(data.session, profile)!;
     setUser(u);
     setSession(data.session);
+    return { success: true, user: u };
+  };
+
+  // ===== Verify registration OTP =====
+  const verifyRegistrationOtp = async (email: string, token: string): Promise<AppUser> => {
+    const { data, error } = await supabase.auth.verifyOtp({
+      email,
+      token,
+      type: 'signup',
+    });
+    if (error) {
+      if (error.message.includes('expired') || error.message.includes('timeout')) {
+        throw new Error('验证码已过期，请重新发送');
+      }
+      if (error.message.includes('invalid')) {
+        throw new Error('验证码错误，请检查后重试');
+      }
+      throw new Error(error.message);
+    }
+    // Fetch profile (trigger may need a moment)
+    await new Promise((r) => setTimeout(r, 300));
+    const profile = await fetchProfile(data.user!.id);
+    const u = buildUser(data.session, profile)!;
+    setUser(u);
+    setSession(data.session);
     return u;
+  };
+
+  // ===== Send password reset OTP =====
+  const sendPasswordResetOtp = async (email: string): Promise<void> => {
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { shouldCreateUser: false },
+    });
+    if (error) {
+      const msg = error.message.toLowerCase();
+      if (msg.includes('rate') || msg.includes('security purposes') || msg.includes('60 seconds')) {
+        throw new Error('请求过于频繁，请60秒后再试');
+      }
+      if (msg.includes('not found') || msg.includes('user not found')) {
+        throw new Error('该邮箱未注册，请检查后重试');
+      }
+      if (msg.includes('sending')) {
+        throw new Error('验证码发送失败，请确认 Supabase SMTP 配置正确（需使用邮箱授权码而非登录密码）');
+      }
+      throw new Error(error.message);
+    }
+  };
+
+  // ===== Verify password reset OTP (logs user in, caller updates password) =====
+  const verifyPasswordResetOtp = async (email: string, token: string): Promise<void> => {
+    const { data, error } = await supabase.auth.verifyOtp({
+      email,
+      token,
+      type: 'email',
+    });
+    if (error) {
+      if (error.message.includes('expired') || error.message.includes('timeout')) {
+        throw new Error('验证码已过期，请重新发送');
+      }
+      if (error.message.includes('invalid')) {
+        throw new Error('验证码错误，请检查后重试');
+      }
+      throw new Error(error.message);
+    }
+    // Session is now set — caller can update password
+    setSession(data.session);
   };
 
   const logout = async () => {
@@ -132,7 +241,12 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, login, register, logout, refreshUser }}>
+    <AuthContext.Provider value={{
+      user, session, loading,
+      login, loginByIdentifier, register,
+      verifyRegistrationOtp, sendPasswordResetOtp, verifyPasswordResetOtp,
+      logout, refreshUser,
+    }}>
       {children}
     </AuthContext.Provider>
   );

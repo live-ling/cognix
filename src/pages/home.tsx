@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { BookOpen, BarChart3, FileText, Target, Lightbulb, Brain, LogIn } from 'lucide-react';
+import { BookOpen, BarChart3, FileText, Target, Lightbulb, Brain, LogIn, Users, Globe } from 'lucide-react';
 import { EnhancedButton } from '@/components/ui/enhanced-button';
 import { ScrollReveal } from '@/components/ui/scroll-reveal';
 import { Card, CardDescription, CardTitle } from '@/components/ui/card';
@@ -9,6 +9,13 @@ import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
 import { CacheManager } from '@/lib/cache';
 import { useSaying } from '@/hooks/use-saying';
 import type { DashboardStats } from '@/lib/types';
+
+interface SiteStats {
+  bank_count: number;
+  total_questions: number;
+  today_answered: number;
+  user_count: number;
+}
 
 const features = [
   {
@@ -53,6 +60,8 @@ export function Home() {
   const { user } = useSupabaseAuth();
   const saying = useSaying();
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [siteStats, setSiteStats] = useState<SiteStats | null>(null);
+  const [showSiteStats, setShowSiteStats] = useState(true);
 
   useEffect(() => {
     if (!user) return;
@@ -65,6 +74,19 @@ export function Home() {
         }
       });
   }, [user]);
+
+  // Fetch site-wide stats
+  useEffect(() => {
+    supabase.rpc('get_site_stats').then(({ data, error }) => {
+      if (!error && data) {
+        setSiteStats(data as SiteStats);
+      }
+    });
+  }, []);
+
+  const displayStats = showSiteStats && siteStats
+    ? { bank_count: siteStats.bank_count, total_questions: siteStats.total_questions, today_answered: siteStats.today_answered }
+    : stats;
 
   return (
     <div className="min-h-screen">
@@ -127,18 +149,34 @@ export function Home() {
               )}
             </div>
 
-            {/* Quick stats */}
-            <div className="flex gap-8 pt-8 text-sm">
-              <div>
-                <p className="text-2xl font-bold text-primary">{stats?.bank_count ?? 0}+</p>
+            {/* Quick stats — click to toggle personal / site-wide */}
+            <div
+              className="flex items-center gap-8 pt-8 text-sm cursor-pointer group"
+              onClick={() => setShowSiteStats(!showSiteStats)}
+              title={showSiteStats ? '点击查看个人统计' : '点击查看全站统计'}
+            >
+              {/* Toggle badge — left side */}
+              <div className="flex-shrink-0">
+                {showSiteStats ? (
+                  <span className="inline-flex items-center gap-1 text-xs text-primary/70 bg-primary/5 px-2 py-1.5 rounded-full">
+                    <Globe className="h-3 w-3" />全站
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-xs text-muted-foreground bg-muted/50 px-2 py-1.5 rounded-full">
+                    <Users className="h-3 w-3" />个人
+                  </span>
+                )}
+              </div>
+              <div className="transition-all duration-200 group-hover:scale-105">
+                <p className="text-2xl font-bold text-primary">{displayStats?.bank_count ?? 0}+</p>
                 <p className="text-muted-foreground">题库数量</p>
               </div>
-              <div>
-                <p className="text-2xl font-bold text-primary">{stats?.total_questions ?? 0}+</p>
+              <div className="transition-all duration-200 group-hover:scale-105">
+                <p className="text-2xl font-bold text-primary">{displayStats?.total_questions ?? 0}+</p>
                 <p className="text-muted-foreground">题目总数</p>
               </div>
-              <div>
-                <p className="text-2xl font-bold text-primary">{stats?.today_answered ?? 0}+</p>
+              <div className="transition-all duration-200 group-hover:scale-105">
+                <p className="text-2xl font-bold text-primary">{displayStats?.today_answered ?? 0}+</p>
                 <p className="text-muted-foreground">今日答题</p>
               </div>
             </div>

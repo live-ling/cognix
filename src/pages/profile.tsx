@@ -16,6 +16,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
 import { supabase } from '@/lib/supabase';
 import { UserAvatar } from '@/components/user-avatar';
+import { Portal } from '@/components/portal';
+import { removeCookie } from '@/lib/cookies';
 import { CacheManager } from '@/lib/cache';
 import type { DashboardStats } from '@/lib/types';
 
@@ -28,6 +30,7 @@ function Modal({ open, onClose, title, children }: {
 }) {
   if (!open) return null;
   return (
+    <Portal>
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
@@ -47,6 +50,7 @@ function Modal({ open, onClose, title, children }: {
         <div className="px-6 py-5">{children}</div>
       </div>
     </div>
+    </Portal>
   );
 }
 
@@ -83,15 +87,16 @@ export function Profile() {
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [showOldPwd, setShowOldPwd] = useState(false);
-  const [showNewPwd, setShowNewPwd] = useState(false);
   const [pwdLoading, setPwdLoading] = useState(false);
   const [pwdError, setPwdError] = useState('');
   const [pwdSuccess, setPwdSuccess] = useState(false);
 
+  // Level detail modal
+  const [levelModalOpen, setLevelModalOpen] = useState(false);
+
   // AI modal
   const [aiModalOpen, setAiModalOpen] = useState(false);
-  const [aiProvider, setAiProvider] = useState('openai');
+  const [aiProvider, setAiProvider] = useState('deepseek');
   const [aiKey, setAiKey] = useState('');
   const [aiModel, setAiModel] = useState('');
   const [showAiKey, setShowAiKey] = useState(false);
@@ -105,19 +110,23 @@ export function Profile() {
   const [aiTestPassed, setAiTestPassed] = useState(false);
   const [aiTestResult, setAiTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [customBaseUrl, setCustomBaseUrl] = useState('');
+  const [aiCustomModel, setAiCustomModel] = useState('');
 
   const fetchStats = async () => {
-    setLoading(true);
+    // Only show skeleton on first load, not on background refresh
+    if (!stats) setLoading(true);
     const { data, error } = await supabase.rpc('get_dashboard_stats');
     if (!error && data) {
       setStats(data as DashboardStats);
       CacheManager.set('profile_stats', data, 10 * 60 * 1000);
+    } else if (error) {
+      console.error('fetchStats RPC error:', error.message);
     }
     setLoading(false);
   };
 
   useEffect(() => {
-    if (stats) { setLoading(false); } else { fetchStats(); }
+    fetchStats();
     fetchAiStats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -212,11 +221,18 @@ export function Profile() {
 
   const getLevel = () => {
     const total = stats?.total_questions ?? 0;
-    if (total >= 500) return { name: '刷题大师', color: 'bg-yellow-500/10 text-yellow-600', icon: Award };
-    if (total >= 200) return { name: '进阶学者', color: 'bg-purple-500/10 text-purple-600', icon: Star };
-    if (total >= 50) return { name: '勤奋学员', color: 'bg-blue-500/10 text-blue-600', icon: BarChart3 };
-    return { name: '初学者', color: 'bg-green-500/10 text-green-600', icon: User };
+    if (total >= 500) return { name: '刷题大师', color: 'bg-yellow-500/10 text-yellow-600', icon: Award, threshold: 500 };
+    if (total >= 200) return { name: '进阶学者', color: 'bg-purple-500/10 text-purple-600', icon: Star, threshold: 200 };
+    if (total >= 50) return { name: '勤奋学员', color: 'bg-blue-500/10 text-blue-600', icon: BarChart3, threshold: 50 };
+    return { name: '初学者', color: 'bg-green-500/10 text-green-600', icon: User, threshold: 0 };
   };
+
+  const ALL_LEVELS = [
+    { name: '刷题大师', threshold: 500, icon: Award, color: 'bg-yellow-500/10 text-yellow-600' },
+    { name: '进阶学者', threshold: 200, icon: Star, color: 'bg-purple-500/10 text-purple-600' },
+    { name: '勤奋学员', threshold: 50, icon: BarChart3, color: 'bg-blue-500/10 text-blue-600' },
+    { name: '初学者', threshold: 0, icon: User, color: 'bg-green-500/10 text-green-600' },
+  ];
 
   // ===== Edit profile modal handlers =====
   const openEditModal = () => {
@@ -321,7 +337,15 @@ export function Profile() {
       bio: editBio.trim(),
       avatar_url: editAvatarUrl,
     }).eq('id', user.id);
-    if (error) { setEditError(error.message); setEditSaving(false); return; }
+    if (error) {
+      if (error.message.includes('duplicate') || error.message.includes('unique') || error.code === '23505') {
+        setEditError('该用户名已被使用');
+      } else {
+        setEditError(error.message);
+      }
+      setEditSaving(false);
+      return;
+    }
     await refreshUser();
     setEditModalOpen(false);
     setEditSaving(false);
@@ -330,7 +354,6 @@ export function Profile() {
   // ===== Password handlers =====
   const openPwdModal = () => {
     setOldPassword(''); setNewPassword(''); setConfirmPassword('');
-    setShowOldPwd(false); setShowNewPwd(false);
     setPwdError(''); setPwdSuccess(false);
     setPwdLoading(false);
     setPwdModalOpen(true);
@@ -349,6 +372,9 @@ export function Profile() {
     if (error) {
       setPwdError(error.message === 'New password should be different from the old password.' ? '新密码不能与原密码相同' : error.message || '修改失败');
     } else {
+      // Clear saved password cookie since it's now stale
+      removeCookie('cognix_remember_password');
+      removeCookie('cognix_remember_pwd');
       setPwdSuccess(true);
     }
     setPwdLoading(false);
@@ -356,10 +382,15 @@ export function Profile() {
 
   // ===== AI provider presets =====
   const AI_PROVIDERS: Record<string, { name: string; baseUrl: string; models: string[] }> = {
-    openai: { name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini', 'o4-mini'] },
     deepseek: { name: 'DeepSeek', baseUrl: 'https://api.deepseek.com', models: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'] },
+    openai: { name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini', 'o4-mini'] },
     zhipu: { name: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', models: ['glm-4-plus', 'glm-4-flash'] },
-    moonshot: { name: 'Moonshot', baseUrl: 'https://api.moonshot.cn/v1', models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'] },
+    moonshot: { name: '月之暗面 Moonshot', baseUrl: 'https://api.moonshot.cn/v1', models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k', 'kimi-latest'] },
+    qwen: { name: '阿里云·百炼 (Qwen)', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen-plus', 'qwen-max', 'qwen-turbo', 'qwen-long'] },
+    ernie: { name: '百度·千帆 (ERNIE)', baseUrl: 'https://qianfan.baidubce.com/v2', models: ['ernie-4.0-turbo-8k', 'ernie-3.5-8k'] },
+    doubao: { name: '火山引擎·方舟 (Doubao)', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', models: ['doubao-1.5-pro-256k', 'doubao-1.5-lite-32k'] },
+    hunyuan: { name: '腾讯云·混元 (Hunyuan)', baseUrl: 'https://api.hunyuan.cloud.tencent.com/v1', models: ['hunyuan-turbos', 'hunyuan-lite'] },
+    minimax: { name: 'MiniMax', baseUrl: 'https://api.minimaxi.com/v1', models: ['abab6.5s-chat'] },
     custom: { name: '自定义', baseUrl: '', models: [] },
   };
 
@@ -381,6 +412,7 @@ export function Profile() {
     setAiKey('');
     setAiModel(user?.ai_model || (AI_PROVIDERS[detected]?.models[0] || ''));
     setCustomBaseUrl(detected === 'custom' ? (user?.ai_base_url || '') : '');
+    setAiCustomModel('');
     setShowAiKey(false);
     setAiError('');
     setAiSaving(false);
@@ -393,13 +425,17 @@ export function Profile() {
   const handleProviderChange = (provider: string) => {
     setAiProvider(provider);
     setAiModel(AI_PROVIDERS[provider]?.models[0] || '');
+    setAiCustomModel('');
     setAiTestPassed(false);
     setAiTestResult(null);
   };
 
+  const getEffectiveModel = () => aiModel === '__custom__' ? aiCustomModel.trim() : aiModel.trim();
+
   const handleTestAi = async () => {
     if (!aiKey.trim()) { setAiError('请先输入 API Key'); return; }
-    if (!aiModel.trim()) { setAiError('请选择模型'); return; }
+    const effectiveModel = getEffectiveModel();
+    if (!effectiveModel) { setAiError('请选择或输入模型'); return; }
     const baseUrl = getAiBaseUrl();
     if (!baseUrl) { setAiError('请填写 API 地址'); return; }
 
@@ -413,7 +449,7 @@ export function Profile() {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${aiKey.trim()}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: aiModel.trim(),
+          model: effectiveModel,
           messages: [
             { role: 'system', content: '只回复单词 OK，不要回复任何其他内容。' },
             { role: 'user', content: 'hi' },
@@ -427,7 +463,7 @@ export function Profile() {
         setAiTestResult({ success: false, message: `API 错误: ${res.status} ${txt.slice(0, 100)}` });
       } else {
         const data = await res.json();
-        trackAiUsage('test_connection', data, aiModel.trim());
+        trackAiUsage('test_connection', data, effectiveModel);
         const msg = data?.choices?.[0]?.message || {};
         const reply = msg?.content || msg?.reasoning_content || '';
         setAiTestResult({ success: true, message: reply ? `连接成功！模型回复: ${reply.slice(0, 50)}` : '连接成功！API 响应正常' });
@@ -441,12 +477,13 @@ export function Profile() {
   const handleSaveAi = async () => {
     if (!user) return;
     const baseUrl = getAiBaseUrl();
+    const effectiveModel = getEffectiveModel();
     setAiSaving(true);
     setAiError('');
     const { error } = await supabase.from('profiles').update({
       ai_api_key: aiKey.trim(),
       ai_base_url: baseUrl,
-      ai_model: aiModel.trim(),
+      ai_model: effectiveModel,
     }).eq('id', user.id);
     if (error) { setAiError(error.message); setAiSaving(false); return; }
     await refreshUser();
@@ -499,10 +536,15 @@ export function Profile() {
                 </div>
               </div>
             </div>
-            <div className={`hidden sm:flex flex-shrink-0 items-center gap-2 px-4 py-2.5 rounded-lg ${level.color}`}>
+            <button
+              type="button"
+              className={`hidden sm:flex flex-shrink-0 items-center gap-2 px-4 py-2.5 rounded-lg ${level.color} cursor-pointer hover:opacity-80 transition-opacity`}
+              onClick={() => setLevelModalOpen(true)}
+              title="查看等级详情"
+            >
               <LevelIcon className="h-5 w-5" />
               <span className="font-semibold text-sm">{level.name}</span>
-            </div>
+            </button>
           </div>
         </div>
       </div>
@@ -833,6 +875,54 @@ export function Profile() {
         </div>
       </Modal>
 
+      {/* ===== Level Detail Modal ===== */}
+      <Modal open={levelModalOpen} onClose={() => setLevelModalOpen(false)} title="等级详情">
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground mb-4">
+            答题总数越多等级越高，当前已答 <span className="font-bold text-foreground">{stats?.total_questions ?? 0} 题</span>
+          </p>
+          {(() => {
+            const total = stats?.total_questions ?? 0;
+            const nextLv = [...ALL_LEVELS].reverse().find(l => total < l.threshold);
+
+            return [...ALL_LEVELS].reverse().map((lv) => {
+            const isCurrent = total >= lv.threshold;
+            const isNext = nextLv?.name === lv.name;
+            const needsMore = isNext ? lv.threshold - total : 0;
+
+            return (
+              <div
+                key={lv.name}
+                className={`flex items-center gap-3 p-3 rounded-lg transition-colors ${
+                  isCurrent ? lv.color + ' border border-current/20' : isNext ? 'bg-muted/50' : 'bg-muted/20 opacity-50'
+                }`}
+              >
+                <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${lv.color}`}>
+                  <lv.icon className="h-4 w-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">{lv.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {lv.threshold === 0 ? '初始等级' : `答题 ${lv.threshold}+ 题`}
+                  </p>
+                </div>
+                <div className="text-right flex-shrink-0">
+                  {isCurrent ? (
+                    <span className="text-xs font-medium text-primary">当前</span>
+                  ) : isNext ? (
+                    <span className="text-xs text-muted-foreground">还需 <span className="font-bold text-foreground">{needsMore}</span> 题</span>
+                  ) : (
+                    <span className={`text-xs ${total > lv.threshold ? 'text-muted-foreground/50' : 'text-muted-foreground/40'}`}>
+                      {total > lv.threshold ? '已解锁' : ''}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })})()}
+        </div>
+      </Modal>
+
       {/* ===== Change Password Modal ===== */}
       <Modal open={pwdModalOpen} onClose={() => setPwdModalOpen(false)} title="修改密码">
         {pwdSuccess ? (
@@ -848,43 +938,33 @@ export function Profile() {
           <form onSubmit={handleChangePassword} className="space-y-4">
             <div>
               <label htmlFor="old-password" className="text-sm font-medium mb-1.5 block">原密码</label>
-              <div className="relative">
-                <Input
-                  id="old-password"
-                  type={showOldPwd ? 'text' : 'password'}
-                  placeholder="请输入当前密码"
-                  value={oldPassword}
-                  onChange={(e) => setOldPassword(e.target.value)}
-                  required
-                  autoFocus
-                />
-                <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onClick={() => setShowOldPwd(!showOldPwd)} aria-label={showOldPwd ? '隐藏' : '显示'}>
-                  {showOldPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
+              <Input
+                id="old-password"
+                type="password"
+                placeholder="请输入当前密码"
+                value={oldPassword}
+                onChange={(e) => setOldPassword(e.target.value)}
+                required
+                autoFocus
+              />
             </div>
             <div>
               <label htmlFor="new-password" className="text-sm font-medium mb-1.5 block">新密码</label>
-              <div className="relative">
-                <Input
-                  id="new-password"
-                  type={showNewPwd ? 'text' : 'password'}
-                  placeholder="至少6位"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  required
-                  minLength={6}
-                />
-                <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onClick={() => setShowNewPwd(!showNewPwd)} aria-label={showNewPwd ? '隐藏' : '显示'}>
-                  {showNewPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
+              <Input
+                id="new-password"
+                type="password"
+                placeholder="至少6位"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                required
+                minLength={6}
+              />
             </div>
             <div>
               <label htmlFor="confirm-password" className="text-sm font-medium mb-1.5 block">确认新密码</label>
               <Input
                 id="confirm-password"
-                type={showNewPwd ? 'text' : 'password'}
+                type="password"
                 placeholder="再次输入新密码"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
@@ -932,6 +1012,38 @@ export function Profile() {
                 {showAiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
+
+            {/* Provider API key guide */}
+            {(() => {
+              const guides: Record<string, { label: string; url: string; tip: string }> = {
+                deepseek: { label: '获取 DeepSeek APIKey', url: 'https://platform.deepseek.com/api_keys', tip: '注册即送额度，价格实惠' },
+                openai: { label: '获取 OpenAI APIKey', url: 'https://platform.openai.com/api-keys', tip: '新用户有免费额度，需绑定信用卡' },
+                zhipu: { label: '获取智谱 GLM APIKey', url: 'https://open.bigmodel.cn/usercenter/apikeys', tip: '新用户有免费额度，需实名认证' },
+                moonshot: { label: '获取 Moonshot APIKey', url: 'https://platform.moonshot.cn/console/api-keys', tip: '注册即送额度，超长上下文' },
+                qwen: { label: '获取百炼 APIKey', url: 'https://bailian.console.aliyun.com/', tip: '新用户有免费额度，模型丰富' },
+                ernie: { label: '获取千帆 APIKey', url: 'https://console.bce.baidu.com/qianfan/overview', tip: '中文理解突出，需实名认证' },
+                doubao: { label: '获取方舟 APIKey', url: 'https://console.volcengine.com/ark/', tip: '多模态能力强，字节生态' },
+                hunyuan: { label: '获取混元 APIKey', url: 'https://console.cloud.tencent.com/hunyuan', tip: '微信/QQ生态整合，适合社交场景' },
+                minimax: { label: '获取 MiniMax APIKey', url: 'https://platform.minimaxi.com/user-center/basic-information', tip: '角色扮演和语音交互有优势' },
+              };
+              const g = guides[aiProvider];
+              if (!g && aiProvider !== 'custom') return null;
+              return (
+                <div className="mt-2 p-2.5 rounded-lg bg-muted/40 text-xs space-y-1">
+                  {g ? (
+                    <>
+                      <a href={g.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline font-medium">
+                        {g.label}
+                        <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                      </a>
+                      <p className="text-muted-foreground">{g.tip}</p>
+                    </>
+                  ) : (
+                    <p className="text-muted-foreground">请从您的 API 服务商处获取 Key，确保兼容 OpenAI 接口格式</p>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           {/* Base URL (only for custom provider) */}
@@ -951,16 +1063,33 @@ export function Profile() {
           <div>
             <label htmlFor="ai-model" className="text-sm font-medium mb-1.5 block">模型</label>
             {AI_PROVIDERS[aiProvider]?.models.length > 0 ? (
-              <select
-                id="ai-model"
-                className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                value={aiModel}
-                onChange={(e) => { setAiModel(e.target.value); setAiTestPassed(false); setAiTestResult(null); }}
-              >
-                {AI_PROVIDERS[aiProvider].models.map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
+              <>
+                <select
+                  id="ai-model"
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  value={aiModel}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setAiModel(val);
+                    if (val !== '__custom__') setAiCustomModel('');
+                    setAiTestPassed(false);
+                    setAiTestResult(null);
+                  }}
+                >
+                  {AI_PROVIDERS[aiProvider].models.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                  <option value="__custom__">自定义模型...</option>
+                </select>
+                {aiModel === '__custom__' && (
+                  <Input
+                    className="mt-2"
+                    placeholder="输入自定义模型名称"
+                    value={aiCustomModel}
+                    onChange={(e) => { setAiCustomModel(e.target.value); setAiTestPassed(false); setAiTestResult(null); }}
+                  />
+                )}
+              </>
             ) : (
               <Input
                 id="ai-model"
@@ -997,6 +1126,7 @@ export function Profile() {
 
       {/* ===== Crop Avatar Modal ===== */}
       {cropModalOpen && cropImage && (
+        <Portal>
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60">
           <div className="bg-background rounded-xl shadow-2xl border border-border w-full max-w-md mx-4">
             <div className="flex items-center justify-between px-6 py-4 border-b border-border">
@@ -1048,6 +1178,7 @@ export function Profile() {
             </div>
           </div>
         </div>
+        </Portal>
       )}
     </div>
   );

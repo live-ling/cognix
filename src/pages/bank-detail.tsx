@@ -3,11 +3,12 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Plus, Pencil, Trash2, BookOpen,
   Upload, Sparkles, Loader2, CheckCircle2, FileText, X,
-  CheckSquare, Square, MinusSquare,
+  CheckSquare, Square, MinusSquare, Globe,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Portal } from '@/components/portal';
 import { trackAiUsage } from '@/lib/ai-tracker';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -71,6 +72,7 @@ export function BankDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [shareConfirmOpen, setShareConfirmOpen] = useState(false);
   const [typeFilter, setTypeFilter] = useState('');
   const [difficultyFilter, setDifficultyFilter] = useState('');
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -152,6 +154,21 @@ export function BankDetail() {
     const { error } = await supabase.from('banks').update({ title: editBankName.trim(), description: editBankDesc.trim() }).eq('id', id);
     if (error) alert(error.message);
     else { setEditingBank(false); fetchData(); }
+  };
+
+  // Toggle share bank to square
+  const handleToggleShare = () => {
+    if (!id || !bank) return;
+    setShareConfirmOpen(true);
+  };
+
+  const confirmToggleShare = async () => {
+    if (!id || !bank) return;
+    const isShared = (bank as any).is_shared;
+    const { error } = await supabase.from('banks').update({ is_shared: !isShared }).eq('id', id);
+    if (error) { alert(error.message); return; }
+    setShareConfirmOpen(false);
+    fetchData();
   };
 
   // Bank delete
@@ -356,10 +373,26 @@ export function BankDetail() {
               {bank.description && (
                 <p className="text-muted-foreground text-sm mt-1">{bank.description}</p>
               )}
+              {(bank as any).source_user_name && (
+                <p className="text-xs text-muted-foreground/60 mt-1 flex items-center gap-1">
+                  <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                  来源：{(bank as any).source_user_name}
+                </p>
+              )}
             </>
           )}
         </div>
         <div className="flex gap-2 flex-shrink-0">
+          {!(bank as any).source_bank_id && (
+            <Button
+              variant={(bank as any).is_shared ? 'default' : 'outline'}
+              size="sm"
+              onClick={handleToggleShare}
+            >
+              <Globe className="h-3.5 w-3.5 mr-1" />
+              {(bank as any).is_shared ? '取消分享' : '分享到广场'}
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => { setEditingBank(true); setEditBankName(bank.name); setEditBankDesc(bank.description || ''); }}>
             <Pencil className="h-3.5 w-3.5" /> 编辑
           </Button>
@@ -805,6 +838,7 @@ export function BankDetail() {
 
       {/* Delete Question Confirmation Modal */}
       {deleteId && (
+        <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setDeleteId(null)}>
           <Card className="w-full max-w-sm mx-4 p-6" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-semibold mb-2">确认删除</h2>
@@ -815,10 +849,32 @@ export function BankDetail() {
             </div>
           </Card>
         </div>
+        </Portal>
+      )}
+
+      {/* Share confirm modal */}
+      {shareConfirmOpen && (
+        <Portal>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShareConfirmOpen(false)}>
+          <Card className="w-full max-w-sm mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-semibold mb-2">{(bank as any)?.is_shared ? '取消分享' : '分享到广场'}</h2>
+            <p className="text-sm text-muted-foreground mb-6">
+              {(bank as any)?.is_shared
+                ? '取消分享后，该题库将从广场中移除，其他人将无法再浏览和导入此题库。'
+                : '分享后，其他用户可以在广场中浏览和导入此题库。'}
+            </p>
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setShareConfirmOpen(false)}>取消</Button>
+              <Button onClick={confirmToggleShare}>{(bank as any)?.is_shared ? '取消分享' : '确认分享'}</Button>
+            </div>
+          </Card>
+        </div>
+        </Portal>
       )}
 
       {/* Delete Bank Confirmation Modal */}
       {deleteBankConfirm && (
+        <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setDeleteBankConfirm(false)}>
           <Card className="w-full max-w-sm mx-4 p-6" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-semibold mb-2">删除题库</h2>
@@ -830,6 +886,7 @@ export function BankDetail() {
             </div>
           </Card>
         </div>
+        </Portal>
       )}
     </div>
   );

@@ -84,6 +84,9 @@ export function dbToBank(row: any): any {
     title: row.title,
     description: row.description,
     question_count: row.question_count || 0,
+    is_shared: row.is_shared || false,
+    source_bank_id: row.source_bank_id,
+    source_user_name: row.source_user_name,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };

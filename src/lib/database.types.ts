@@ -9,6 +9,7 @@ export interface Database {
           id: string;
           name: string;
           bio: string | null;
+          avatar_url: string | null;
           ai_api_key: string | null;
           ai_base_url: string | null;
           ai_model: string | null;

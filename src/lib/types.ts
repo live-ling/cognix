@@ -10,6 +10,9 @@ export interface Bank {
   title?: string; // alias
   description?: string;
   question_count: number;
+  is_shared: boolean;
+  source_bank_id?: string;
+  source_user_name?: string;
   created_at: string;
   updated_at: string;
 }
@@ -18,6 +21,7 @@ export interface BankCreate {
   name?: string;
   title?: string;
   description?: string;
+  is_shared?: boolean;
 }
 
 // Question

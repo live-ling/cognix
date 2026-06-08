@@ -8,6 +8,7 @@ import { UserAvatar } from "@/components/user-avatar"
 
 const navLinks = [
   { to: "/", label: "首页" },
+  { to: "/square", label: "广场" },
   { to: "/profile", label: "我的" },
   { to: "/banks", label: "题库" },
   { to: "/practice", label: "练习" },
@@ -126,7 +127,7 @@ export function Header() {
                     : "hover:bg-accent"
                 )}
               >
-                <UserAvatar name={user.name} email={user.email} size="sm" />
+                <UserAvatar name={user.name} email={user.email} avatarUrl={user.avatar_url} size="sm" />
                 <span className="text-sm font-medium max-w-[100px] truncate">{user.name}</span>
                 <ChevronDown className="h-3 w-3 text-muted-foreground" />
               </button>

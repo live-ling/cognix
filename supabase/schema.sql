@@ -4,6 +4,37 @@
 -- https://supabase.com/dashboard/project/bbiwowuwlrneivycdqkf/sql
 -- ============================================================
 
+-- ============================================================
+-- Helper function: lookup email by username (for username login)
+-- ============================================================
+create or replace function public.get_email_by_name(p_name text)
+returns text
+language sql
+security definer set search_path = 'public'
+as $$
+  select u.email
+  from auth.users u
+  join public.profiles p on p.id = u.id
+  where p.name = p_name
+  limit 1;
+$$;
+
+-- ============================================================
+-- Site-wide stats (cross-user, for public display)
+-- ============================================================
+create or replace function public.get_site_stats()
+returns jsonb
+language sql
+security definer set search_path = 'public'
+as $$
+  select jsonb_build_object(
+    'bank_count', (select count(*) from public.banks),
+    'total_questions', (select count(*) from public.questions),
+    'today_answered', coalesce((select sum(count) from public.learning_logs where date = current_date), 0),
+    'user_count', (select count(*) from public.profiles)
+  );
+$$;
+
 -- 1. Profiles (extends auth.users)
 create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
@@ -33,6 +64,9 @@ $$;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- Unique nickname constraint
+alter table public.profiles add constraint profiles_name_unique unique (name);
 
 alter table public.profiles enable row level security;
 
