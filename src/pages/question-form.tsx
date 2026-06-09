@@ -20,7 +20,7 @@ export function QuestionForm() {
   const isEdit = !!qid;
 
   const [stem, setStem] = useState('');
-  const [type, setType] = useState<'single' | 'multiple' | 'judgement'>('single');
+  const [type, setType] = useState<'single' | 'multiple' | 'judgement' | 'fill_blank' | 'short_answer'>('single');
   const [options, setOptions] = useState<string[]>(['', '']);
   const [answers, setAnswers] = useState<string[]>([]);
   const [analysis, setAnalysis] = useState('');
@@ -46,7 +46,7 @@ export function QuestionForm() {
         if (err) { setError(err.message); setLoading(false); return; }
         const fq = dbToQuestion(q);
         setStem(fq.stem);
-        setType(fq.type as 'single' | 'multiple' | 'judgement');
+        setType(fq.type as any);
         setOptions(fq.options || ['', '']);
         setAnswers(fq.answers || []);
         setAnalysis(fq.analysis || '');
@@ -58,14 +58,18 @@ export function QuestionForm() {
   }, [isEdit, bankId, qid]);
 
   const handleTypeChange = (newType: string) => {
-    setType(newType as 'single' | 'multiple' | 'judgement');
+    setType(newType as any);
     setAnswers([]);
     if (newType === 'judgement') {
       setOptions(['正确', '错误']);
+    } else if (newType === 'fill_blank' || newType === 'short_answer') {
+      setOptions([]);
     } else if (options.length < 2) {
       setOptions(['', '']);
     }
   };
+
+  const blankCount = (stem.match(/_{2,}/g) || []).length;
 
   const addOption = () => {
     if (options.length < 6) setOptions([...options, '']);
@@ -89,13 +93,15 @@ export function QuestionForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!stem.trim()) return;
-    if (type !== 'judgement' && options.some((o) => !o.trim())) return;
+    if (type !== 'judgement' && type !== 'fill_blank' && type !== 'short_answer' && options.some((o) => !o.trim())) return;
     if (answers.length === 0) return;
+    if (type === 'fill_blank' && answers.some((a) => !a?.trim())) return;
+    if (type === 'short_answer' && !answers[0]?.trim()) return;
 
     const payload: QuestionCreate = {
       stem: stem.trim(),
       type,
-      options: type === 'judgement' ? ['正确', '错误'] : options.map((o) => o.trim()),
+      options: type === 'judgement' ? ['正确', '错误'] : (type === 'fill_blank' || type === 'short_answer') ? [] : options.map((o) => o.trim()),
       answers,
       analysis: analysis.trim() || undefined,
       difficulty,
@@ -113,6 +119,15 @@ export function QuestionForm() {
     setLoading(false);
   };
 
+  // Validate URL before fetching (prevents cryptic "Invalid value" errors)
+  const validateFetchUrl = (url: string): void => {
+    try {
+      new URL(url);
+    } catch {
+      throw new Error(`AI 接口地址无效: ${url}`);
+    }
+  };
+
   // AI: Generate explanation
   const handleGenerateExplanation = async () => {
     if (!user?.ai_api_key || !stem.trim()) return;
@@ -123,9 +138,12 @@ export function QuestionForm() {
       const prompt = `请为以下题目生成一段简洁的解析（100字以内）：\n\n题干：${stem}\n选项：\n${optionsText}\n正确答案：${answers.join(', ')}\n\n只返回解析内容，不要其他文字。`;
 
       const baseUrl = (user.ai_base_url || 'https://api.openai.com/v1').replace(/\/$/, '');
-      const res = await fetch(`${baseUrl}/chat/completions`, {
+      const url = `${baseUrl}/chat/completions`;
+      validateFetchUrl(url);
+      const authHeader = `Bearer ${user.ai_api_key}`;
+      const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${user.ai_api_key}`, 'Content-Type': 'application/json' },
+        headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: user.ai_model || 'gpt-4o-mini',
           messages: [{ role: 'user', content: prompt }],
@@ -158,35 +176,41 @@ export function QuestionForm() {
     setShowSimilar(false);
     setSimilarQuestions([]);
     try {
-      const optionsText = type === 'judgement' ? '正确/错误' : options.map((o, i) => `${String.fromCharCode(65 + i)}. ${o}`).join('\n');
+      const typeLabel = type === 'single' ? '单选' : type === 'multiple' ? '多选' : type === 'judgement' ? '判断' : type === 'fill_blank' ? '填空' : '简答';
+      const optionsText = type === 'judgement' ? '正确/错误' : type === 'fill_blank' ? '（无选项，用____标记填空）' : type === 'short_answer' ? '（无选项）' : options.map((o, i) => `${String.fromCharCode(65 + i)}. ${o}`).join('\n');
+      const answerText = type === 'fill_blank' ? JSON.stringify(answers) : answers.join(', ');
       const prompt = `请根据以下题目，生成 3 道同类型、同难度的题目。
 
 原题：
 题干：${stem}
-类型：${type === 'single' ? '单选' : type === 'multiple' ? '多选' : '判断'}
+类型：${typeLabel}
 选项：${optionsText}
-答案：${answers.join(', ')}
+答案：${answerText}
 
 要求：
-- type 只能是 "single"、"multiple"、"judgement"
-- options 格式为 "选项内容"（不带字母前缀）
-- answers 格式如 ["A"] 或 ["A","C"] 或 ["正确"]
+- type 可以是 "single"、"multiple"、"judgement"、"fill_blank"、"short_answer"
+- single/multiple/judgement 的 options 格式为 "选项内容"（不带字母前缀）
+- fill_blank 的 options 为 []，answers 为 JSON 数组如 ["答案1","答案2"]，题干中用 ____ 标记填空
+- short_answer 的 options 为 []，answers 为 [参考答案文本]
+- answers 格式：单选 ["A"]，多选 ["A","C"]，判断 ["正确"] 或 ["错误"]
 - 只返回 JSON 数组，不要其他文字
 
 格式：
 [
   {
     "stem": "题干",
-    "type": "single",
-    "options": ["选项1", "选项2", "选项3", "选项4"],
-    "answers": ["A"],
+    "type": "${type}",
+    "options": ${type === 'fill_blank' || type === 'short_answer' ? '[]' : '["选项1", "选项2", "选项3", "选项4"]'},
+    "answers": ${type === 'fill_blank' ? '["答案1","答案2"]' : type === 'short_answer' ? '["参考答案"]' : '["A"]'},
     "analysis": "解析",
     "difficulty": "${difficulty}"
   }
 ]`;
 
-      const baseUrl = (user.ai_base_url || 'https://api.openai.com/v1').replace(/\/$/, '');
-      const res = await fetch(`${baseUrl}/chat/completions`, {
+      const baseUrl2 = (user.ai_base_url || 'https://api.openai.com/v1').replace(/\/$/, '');
+      const url2 = `${baseUrl2}/chat/completions`;
+      validateFetchUrl(url2);
+      const res = await fetch(url2, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${user.ai_api_key}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -301,6 +325,8 @@ export function QuestionForm() {
                 { value: 'single', label: '单选题' },
                 { value: 'multiple', label: '多选题' },
                 { value: 'judgement', label: '判断题' },
+                { value: 'fill_blank', label: '填空题' },
+                { value: 'short_answer', label: '简答题' },
               ].map(({ value, label }) => (
                 <button
                   key={value}
@@ -334,7 +360,7 @@ export function QuestionForm() {
         </Card>
 
         {/* Options */}
-        {type !== 'judgement' && (
+        {type !== 'judgement' && type !== 'fill_blank' && type !== 'short_answer' && (
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-base">选项</CardTitle>
@@ -411,6 +437,53 @@ export function QuestionForm() {
                   </button>
                 ))}
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Fill blank answer */}
+        {type === 'fill_blank' && (
+          <Card>
+            <CardHeader><CardTitle className="text-base">填空答案</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              {blankCount === 0 ? (
+                <p className="text-sm text-muted-foreground">请在题干中使用 <code className="bg-muted px-1 rounded">____</code>（连续下划线）标记填空位置</p>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground">共 {blankCount} 个空，请为每个空填写正确答案</p>
+                  {Array.from({ length: blankCount }).map((_, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-muted-foreground w-12">第 {i + 1} 空</span>
+                      <Input
+                        placeholder={`第 ${i + 1} 空答案`}
+                        value={answers[i] || ''}
+                        onChange={(e) => {
+                          const newAnswers = [...answers];
+                          newAnswers[i] = e.target.value;
+                          setAnswers(newAnswers);
+                        }}
+                        required
+                      />
+                    </div>
+                  ))}
+                </>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Short answer reference */}
+        {type === 'short_answer' && (
+          <Card>
+            <CardHeader><CardTitle className="text-base">参考答案</CardTitle></CardHeader>
+            <CardContent>
+              <textarea
+                className="w-full h-28 rounded-md border border-input bg-transparent px-3 py-2 text-sm resize-y focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring placeholder:text-muted-foreground"
+                placeholder="输入参考答案（练习时会展示给用户对照）..."
+                value={answers[0] || ''}
+                onChange={(e) => setAnswers([e.target.value])}
+                required
+              />
             </CardContent>
           </Card>
         )}

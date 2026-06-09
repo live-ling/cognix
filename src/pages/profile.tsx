@@ -17,8 +17,8 @@ import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
 import { supabase } from '@/lib/supabase';
 import { UserAvatar } from '@/components/user-avatar';
 import { Portal } from '@/components/portal';
-import { removeCookie } from '@/lib/cookies';
 import { CacheManager } from '@/lib/cache';
+import { removeEncryptedPassword } from '@/lib/crypto';
 import type { DashboardStats } from '@/lib/types';
 
 // ===== Modal component =====
@@ -219,6 +219,22 @@ export function Profile() {
     }
   };
 
+  // Apply for special user role
+  const handleApplySpecial = async () => {
+    if (!user || user.role !== 'user' || user.special_applied_at) return;
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ special_applied_at: new Date().toISOString() })
+        .eq('id', user.id);
+      if (error) { alert('申请失败: ' + error.message); return; }
+      await refreshUser();
+      alert('申请已提交，管理员审核后会通知您');
+    } catch (err: any) {
+      alert('申请失败: ' + err.message);
+    }
+  };
+
   const getLevel = () => {
     const total = stats?.total_questions ?? 0;
     if (total >= 500) return { name: '刷题大师', color: 'bg-yellow-500/10 text-yellow-600', icon: Award, threshold: 500 };
@@ -372,9 +388,8 @@ export function Profile() {
     if (error) {
       setPwdError(error.message === 'New password should be different from the old password.' ? '新密码不能与原密码相同' : error.message || '修改失败');
     } else {
-      // Clear saved password cookie since it's now stale
-      removeCookie('cognix_remember_password');
-      removeCookie('cognix_remember_pwd');
+      // Clear stale saved password
+      removeEncryptedPassword();
       setPwdSuccess(true);
     }
     setPwdLoading(false);
@@ -480,11 +495,15 @@ export function Profile() {
     const effectiveModel = getEffectiveModel();
     setAiSaving(true);
     setAiError('');
-    const { error } = await supabase.from('profiles').update({
-      ai_api_key: aiKey.trim(),
-      ai_base_url: baseUrl,
-      ai_model: effectiveModel,
-    }).eq('id', user.id);
+    // Save API key via encrypted RPC, other fields directly
+    const [keyResult, profileResult] = await Promise.all([
+      supabase.rpc('save_ai_api_key', { p_key: aiKey.trim() }),
+      supabase.from('profiles').update({
+        ai_base_url: baseUrl,
+        ai_model: effectiveModel,
+      }).eq('id', user.id),
+    ]);
+    const error = keyResult.error || profileResult.error;
     if (error) { setAiError(error.message); setAiSaving(false); return; }
     await refreshUser();
     setAiModalOpen(false);
@@ -523,6 +542,12 @@ export function Profile() {
               <div className="min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                   <h1 className="text-3xl font-bold">{user.name}</h1>
+                  {user.role === 'admin' && (
+                    <Badge variant="destructive" className="text-xs">管理员</Badge>
+                  )}
+                  {user.role === 'special' && (
+                    <Badge variant="success" className="text-xs">贡献者</Badge>
+                  )}
                   <Button size="icon" variant="ghost" className="h-7 w-7 opacity-60 hover:opacity-100" onClick={openEditModal}>
                     <Edit3 className="h-3.5 w-3.5" />
                   </Button>
@@ -705,6 +730,19 @@ export function Profile() {
                     <span className="text-sm font-medium group-hover:text-primary transition-colors">{label}</span>
                   </Link>
                 ))}
+                {user.role === 'user' && (
+                  <button
+                    type="button"
+                    onClick={handleApplySpecial}
+                    disabled={!!user.special_applied_at}
+                    className="flex items-center gap-2 p-2.5 rounded-lg hover:bg-accent/50 transition-colors group text-left"
+                  >
+                    <Award className="h-4 w-4 text-warning" />
+                    <span className="text-sm font-medium group-hover:text-warning transition-colors">
+                      {user.special_applied_at ? '已申请（审核中）' : '申请贡献者'}
+                    </span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={openPwdModal}

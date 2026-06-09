@@ -4,12 +4,16 @@ const TYPE_TO_FRONTEND: Record<string, string> = {
   SINGLE: 'single',
   MULTIPLE: 'multiple',
   TRUE_FALSE: 'judgement',
+  FILL_BLANK: 'fill_blank',
+  SHORT_ANSWER: 'short_answer',
 };
 
 const TYPE_TO_BACKEND: Record<string, string> = {
   single: 'SINGLE',
   multiple: 'MULTIPLE',
   judgement: 'TRUE_FALSE',
+  fill_blank: 'FILL_BLANK',
+  short_answer: 'SHORT_ANSWER',
 };
 
 const DIFF_TO_FRONTEND: Record<string, string> = {
@@ -39,13 +43,17 @@ export function toBackendDiff(frontendDiff: string): string {
 export function dbToQuestion(row: any): any {
   const type = toFrontendType(row.type);
   const answer = row.answer || '';
+  const answersParsed = type === 'multiple' ? answer.split('')
+           : type === 'fill_blank' ? (() => { try { return JSON.parse(answer); } catch { return [answer]; } })()
+           : [answer];
   return {
     id: row.id,
     bank_id: row.bank_id,
     type,
     stem: row.content,
     options: row.options || [],
-    answers: type === 'multiple' ? answer.split('') : [answer],
+    answers: answersParsed,
+    blank_count: type === 'fill_blank' ? answersParsed.length : undefined,
     analysis: row.explanation,
     difficulty: toFrontendDiff(row.difficulty),
     tags: row.tags,
@@ -60,8 +68,8 @@ export function questionToDb(data: any): any {
   let answer = '';
   if (type === 'MULTIPLE') {
     answer = Array.isArray(data.answers) ? data.answers.sort().join('') : data.answers;
-  } else if (type === 'TRUE_FALSE') {
-    answer = Array.isArray(data.answers) ? data.answers[0] : data.answers;
+  } else if (type === 'FILL_BLANK') {
+    answer = Array.isArray(data.answers) ? JSON.stringify(data.answers) : data.answers;
   } else {
     answer = Array.isArray(data.answers) ? data.answers[0] : data.answers;
   }

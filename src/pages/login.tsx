@@ -10,10 +10,10 @@ import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
 import { UserAvatar } from '@/components/user-avatar';
 import { Portal } from '@/components/portal';
 import { getCookie, setCookie, removeCookie } from '@/lib/cookies';
+import { saveEncryptedPassword, loadDecryptedPassword, removeEncryptedPassword } from '@/lib/crypto';
 import { useSaying } from '@/hooks/use-saying';
 
 const REMEMBER_EMAIL_KEY = 'cognix_remember_email';
-const REMEMBER_PASSWORD_KEY = 'cognix_remember_password';
 const REMEMBER_NAME_KEY = 'cognix_remember_name';
 const REMEMBER_AVATAR_KEY = 'cognix_remember_avatar';
 const REMEMBER_ME_FLAG = 'cognix_remember_me';
@@ -65,7 +65,6 @@ export function Login() {
   const [verifyLoading, setVerifyLoading] = useState(false);
   const [verifyError, setVerifyError] = useState('');
   const [verifyResendCooldown, setVerifyResendCooldown] = useState(0);
-  const [verifyRegisterPassword, setVerifyRegisterPassword] = useState('');
 
   // ===== Forgot password (OTP) state =====
   const [forgotOpen, setForgotOpen] = useState(false);
@@ -163,15 +162,15 @@ export function Login() {
   const savedEmail = getCookie(REMEMBER_EMAIL_KEY) || '';
   const savedName = getCookie(REMEMBER_NAME_KEY) || '';
   const savedAvatar = getCookie(REMEMBER_AVATAR_KEY) || '';
-  const savedPassword = getCookie(REMEMBER_PASSWORD_KEY) || '';
   const isPreLogin = rememberMe && !!savedEmail && !isRegister && !isResetMode && !showVerify;
 
   const [preLoginMode, setPreLoginMode] = useState(isPreLogin);
-  const [needPassword, setNeedPassword] = useState(isPreLogin && !savedPassword);
+  const [preLoginReady, setPreLoginReady] = useState(false);
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState(isPreLogin ? savedEmail : '');
-  const [password, setPassword] = useState(isPreLogin ? savedPassword : '');
+  const [password, setPassword] = useState('');
+  const [verifyRegisterPassword, setVerifyRegisterPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
   const GITEE_CLIENT_ID = import.meta.env.VITE_GITEE_CLIENT_ID || '';
@@ -195,6 +194,18 @@ export function Login() {
     if (oauthError) { setError(oauthError.message); setOauthLoading(null); }
   };
 
+  // Decrypt saved password for pre-login mode
+  useEffect(() => {
+    if (isPreLogin && rememberPassword && getCookie(REMEMBER_PWD_FLAG) === 'true') {
+      loadDecryptedPassword().then((decrypted) => {
+        if (decrypted) setPassword(decrypted);
+        setPreLoginReady(true);
+      });
+    } else {
+      setPreLoginReady(true);
+    }
+  }, []);
+
   if (user && !isResetMode && !showVerify) {
     return <Navigate to="/profile" replace />;
   }
@@ -205,7 +216,6 @@ export function Login() {
     setPassword('');
     setError('');
     setShowPassword(false);
-    setNeedPassword(false);
   };
 
   const toggleMode = () => {
@@ -213,15 +223,14 @@ export function Login() {
     setPreLoginMode(false);
     setName('');
     setEmail(getCookie(REMEMBER_ME_FLAG) === 'true' ? (getCookie(REMEMBER_EMAIL_KEY) || '') : '');
-    setPassword(getCookie(REMEMBER_PWD_FLAG) === 'true' ? (getCookie(REMEMBER_PASSWORD_KEY) || '') : '');
+    setPassword('');
     setConfirmPassword('');
     setError('');
     setShowPassword(false);
-    setNeedPassword(false);
     setShowVerify(false);
   };
 
-  const saveRememberCookies = (emailAddr: string, displayName: string, avatarUrl: string, pwd: string) => {
+  const saveRememberCookies = async (emailAddr: string, displayName: string, avatarUrl: string, pwd: string) => {
     if (rememberMe) {
       setCookie(REMEMBER_EMAIL_KEY, emailAddr, 30);
       setCookie(REMEMBER_NAME_KEY, displayName, 30);
@@ -232,15 +241,15 @@ export function Login() {
       removeCookie(REMEMBER_NAME_KEY);
       removeCookie(REMEMBER_AVATAR_KEY);
       removeCookie(REMEMBER_ME_FLAG);
-      removeCookie(REMEMBER_PASSWORD_KEY);
+      removeEncryptedPassword();
       removeCookie(REMEMBER_PWD_FLAG);
       setRememberPassword(false);
     }
     if (rememberMe && rememberPassword) {
-      setCookie(REMEMBER_PASSWORD_KEY, pwd, 30);
+      await saveEncryptedPassword(pwd);
       setCookie(REMEMBER_PWD_FLAG, 'true', 30);
     } else {
-      removeCookie(REMEMBER_PASSWORD_KEY);
+      removeEncryptedPassword();
       removeCookie(REMEMBER_PWD_FLAG);
     }
   };
@@ -278,8 +287,8 @@ export function Login() {
         navigate('/profile', { replace: true });
       }
     } catch (err: any) {
-      if (preLoginMode && !needPassword) {
-        setNeedPassword(true);
+      if (preLoginMode) {
+        setPreLoginMode(false);
         setPassword('');
       }
       setError(err.message || '操作失败，请重试');
@@ -584,25 +593,27 @@ export function Login() {
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-4">
-                {needPassword && (
-                  <div>
-                    <label className="text-sm font-medium mb-1.5 block">密码</label>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">密码</label>
+                  {preLoginReady ? (
                     <Input type="password" placeholder="请输入密码" value={password} onChange={(e) => setPassword(e.target.value)} required autoFocus />
-                  </div>
-                )}
+                  ) : (
+                    <div className="h-9 flex items-center text-sm text-muted-foreground">
+                      <span className="animate-pulse">正在解密...</span>
+                    </div>
+                  )}
+                </div>
 
                 {error && <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-md">{error}</p>}
 
-                {needPassword && (
-                  <div className="flex items-center justify-end">
-                    <button type="button" className="text-sm text-primary hover:underline"
-                      onClick={() => { setForgotEmail(savedEmail); setForgotStep('email'); setForgotDone(false); setForgotError(''); setForgotOpen(true); }}>
-                      忘记密码？
-                    </button>
-                  </div>
-                )}
+                <div className="flex items-center justify-end">
+                  <button type="button" className="text-sm text-primary hover:underline"
+                    onClick={() => { setForgotEmail(savedEmail); setForgotStep('email'); setForgotDone(false); setForgotError(''); setForgotOpen(true); }}>
+                    忘记密码？
+                  </button>
+                </div>
 
-                <Button type="submit" className="w-full" disabled={loading}>
+                <Button type="submit" className="w-full" disabled={loading || !preLoginReady}>
                   {loading ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />登录中...</> : '确认登录'}
                 </Button>
               </form>

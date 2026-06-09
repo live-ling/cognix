@@ -126,3 +126,120 @@ BEGIN
   RETURN v_new_bank_id;
 END;
 $$;
+
+
+-- ============================================================
+-- 4. Role System (用户角色 + 分享审核)
+-- ============================================================
+
+-- 4a. Add role and status columns to profiles
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'user';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'active';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS special_applied_at timestamptz;
+
+-- Add check constraints (idempotent)
+DO $$ BEGIN
+  ALTER TABLE public.profiles ADD CONSTRAINT profiles_role_check CHECK (role IN ('user', 'special', 'admin'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.profiles ADD CONSTRAINT profiles_status_check CHECK (status IN ('active', 'banned'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- 4b. Helper function to get current user's role (bypasses RLS)
+CREATE OR REPLACE FUNCTION public.get_current_user_role()
+RETURNS text
+LANGUAGE sql
+SECURITY DEFINER SET search_path = 'public'
+STABLE
+AS $$
+  SELECT role FROM public.profiles WHERE id = (select auth.uid()) LIMIT 1;
+$$;
+
+-- Admin RLS policies for profiles
+DROP POLICY IF EXISTS "Admin can read all profiles" ON public.profiles;
+CREATE POLICY "Admin can read all profiles"
+  ON public.profiles FOR SELECT TO authenticated
+  USING (public.get_current_user_role() = 'admin');
+
+DROP POLICY IF EXISTS "Admin can update any profile" ON public.profiles;
+CREATE POLICY "Admin can update any profile"
+  ON public.profiles FOR UPDATE TO authenticated
+  USING (public.get_current_user_role() = 'admin');
+
+-- 4c. Share requests table
+CREATE TABLE IF NOT EXISTS public.share_requests (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  bank_id uuid NOT NULL REFERENCES public.banks(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  admin_note text,
+  created_at timestamptz DEFAULT now(),
+  reviewed_at timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS idx_share_requests_user_id ON public.share_requests(user_id);
+CREATE INDEX IF NOT EXISTS idx_share_requests_status ON public.share_requests(status);
+
+ALTER TABLE public.share_requests ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can read own share requests" ON public.share_requests;
+CREATE POLICY "Users can read own share requests"
+  ON public.share_requests FOR SELECT TO authenticated
+  USING ((select auth.uid()) = user_id);
+
+DROP POLICY IF EXISTS "Users can create own share requests" ON public.share_requests;
+CREATE POLICY "Users can create own share requests"
+  ON public.share_requests FOR INSERT TO authenticated
+  WITH CHECK ((select auth.uid()) = user_id);
+
+DROP POLICY IF EXISTS "Admin can read all share requests" ON public.share_requests;
+CREATE POLICY "Admin can read all share requests"
+  ON public.share_requests FOR SELECT TO authenticated
+  USING (public.get_current_user_role() = 'admin');
+
+DROP POLICY IF EXISTS "Admin can update share requests" ON public.share_requests;
+CREATE POLICY "Admin can update share requests"
+  ON public.share_requests FOR UPDATE TO authenticated
+  USING (public.get_current_user_role() = 'admin');
+
+-- 4d. Questions RLS — allow reading questions in shared banks (fixes square count)
+DROP POLICY IF EXISTS "Anyone can read questions in shared banks" ON public.questions;
+CREATE POLICY "Anyone can read questions in shared banks"
+  ON public.questions FOR SELECT
+  USING (exists (select 1 from public.banks where id = questions.bank_id and is_shared = true));
+
+-- 4e. Set your first admin (replace with actual user id):
+-- UPDATE public.profiles SET role = 'admin' WHERE id = 'your-user-uuid-here';
+
+
+-- ============================================================
+-- 5. AI API Key functions (plaintext, protected by RLS)
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION public.save_ai_api_key(p_key text)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = 'public' AS $$
+BEGIN
+  UPDATE public.profiles SET ai_api_key = CASE
+    WHEN p_key IS NULL OR p_key = '' THEN NULL
+    ELSE p_key
+  END WHERE id = auth.uid();
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_ai_api_key()
+RETURNS text LANGUAGE plpgsql SECURITY DEFINER SET search_path = 'public' AS $$
+DECLARE v_key text;
+BEGIN
+  SELECT ai_api_key INTO v_key FROM public.profiles WHERE id = auth.uid();
+  RETURN COALESCE(v_key, '');
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.is_ai_configured()
+RETURNS boolean LANGUAGE sql SECURITY DEFINER SET search_path = 'public' STABLE AS $$
+  SELECT ai_api_key IS NOT NULL AND ai_api_key != ''
+  FROM public.profiles WHERE id = auth.uid() LIMIT 1;
+$$;

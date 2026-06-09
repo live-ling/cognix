@@ -31,3 +31,29 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   return <>{children}</>;
 }
+
+export function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useSupabaseAuth();
+  const location = useLocation();
+
+  if (loading) {
+    return (
+      <div className="page-container">
+        <div className="space-y-4">
+          <Skeleton type="title" width="40%" />
+          <Skeleton type="text" width="60%" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  if (user.role !== 'admin') {
+    return <Navigate to="/profile" replace />;
+  }
+
+  return <>{children}</>;
+}

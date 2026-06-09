@@ -4,6 +4,10 @@
 -- https://supabase.com/dashboard/project/bbiwowuwlrneivycdqkf/sql
 -- ============================================================
 
+-- Note: API keys are stored as plaintext, protected by RLS policies.
+-- No pgcrypto extension required.
+
+
 -- ============================================================
 -- Helper function: lookup email by username (for username login)
 -- ============================================================
@@ -41,6 +45,9 @@ create table public.profiles (
   name text not null default '',
   bio text default '',
   avatar_url text default '',
+  role text not null default 'user' check (role in ('user', 'special', 'admin')),
+  status text not null default 'active' check (status in ('active', 'banned')),
+  special_applied_at timestamptz,
   ai_api_key text,
   ai_base_url text,
   ai_model text,
@@ -68,6 +75,16 @@ create trigger on_auth_user_created
 -- Unique nickname constraint
 alter table public.profiles add constraint profiles_name_unique unique (name);
 
+-- Helper function: get current user's role (SECURITY DEFINER to bypass RLS)
+create or replace function public.get_current_user_role()
+returns text
+language sql
+security definer set search_path = 'public'
+stable
+as $$
+  select role from public.profiles where id = (select auth.uid()) limit 1;
+$$;
+
 alter table public.profiles enable row level security;
 
 create policy "Users can read own profile"
@@ -80,6 +97,60 @@ create policy "Users can update own profile"
   to authenticated
   using ((select auth.uid()) = id)
   with check ((select auth.uid()) = id);
+
+create policy "Admin can read all profiles"
+  on public.profiles for select
+  to authenticated
+  using (public.get_current_user_role() = 'admin');
+
+create policy "Admin can update any profile"
+  on public.profiles for update
+  to authenticated
+  using (public.get_current_user_role() = 'admin');
+
+
+-- AI API Key functions (plaintext, protected by RLS)
+
+-- Save API key
+create or replace function public.save_ai_api_key(p_key text)
+returns void
+language plpgsql
+security definer set search_path = 'public'
+as $$
+begin
+  update public.profiles
+  set ai_api_key = case
+    when p_key is null or p_key = '' then null
+    else p_key
+  end
+  where id = auth.uid();
+end;
+$$;
+
+-- Read API key
+create or replace function public.get_ai_api_key()
+returns text
+language plpgsql
+security definer set search_path = 'public'
+as $$
+declare
+  v_key text;
+begin
+  select ai_api_key into v_key from public.profiles where id = auth.uid();
+  return coalesce(v_key, '');
+end;
+$$;
+
+-- Check if AI is configured (no decryption)
+create or replace function public.is_ai_configured()
+returns boolean
+language sql
+security definer set search_path = 'public'
+stable
+as $$
+  select ai_api_key is not null and ai_api_key != ''
+  from public.profiles where id = auth.uid() limit 1;
+$$;
 
 
 -- 2. Banks
@@ -105,7 +176,7 @@ create policy "Users can CRUD own banks"
 create table public.questions (
   id uuid primary key default gen_random_uuid(),
   bank_id uuid not null references public.banks(id) on delete cascade,
-  type text not null check (type in ('SINGLE', 'MULTIPLE', 'TRUE_FALSE')),
+  type text not null check (type in ('SINGLE', 'MULTIPLE', 'TRUE_FALSE', 'FILL_BLANK', 'SHORT_ANSWER')),
   content text not null,
   options jsonb not null default '[]',
   answer text not null,
@@ -132,6 +203,12 @@ create policy "Users can CRUD questions in own banks"
     (select auth.uid()) = (
       select user_id from public.banks where id = questions.bank_id
     )
+  );
+
+create policy "Anyone can read questions in shared banks"
+  on public.questions for select
+  using (
+    exists (select 1 from public.banks where id = questions.bank_id and is_shared = true)
   );
 
 
@@ -233,7 +310,44 @@ create policy "Users can CRUD own learning logs"
   with check ((select auth.uid()) = user_id);
 
 
--- 8. Storage bucket for AI imports
+-- 8. Share Requests (审批分享申请)
+create table public.share_requests (
+  id uuid primary key default gen_random_uuid(),
+  bank_id uuid not null references public.banks(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  admin_note text,
+  created_at timestamptz default now(),
+  reviewed_at timestamptz
+);
+
+create index idx_share_requests_user_id on public.share_requests(user_id);
+create index idx_share_requests_status on public.share_requests(status);
+
+alter table public.share_requests enable row level security;
+
+create policy "Users can read own share requests"
+  on public.share_requests for select
+  to authenticated
+  using ((select auth.uid()) = user_id);
+
+create policy "Users can create own share requests"
+  on public.share_requests for insert
+  to authenticated
+  with check ((select auth.uid()) = user_id);
+
+create policy "Admin can read all share requests"
+  on public.share_requests for select
+  to authenticated
+  using (public.get_current_user_role() = 'admin');
+
+create policy "Admin can update share requests"
+  on public.share_requests for update
+  to authenticated
+  using (public.get_current_user_role() = 'admin');
+
+
+-- 9. Storage bucket for AI imports
 insert into storage.buckets (id, name, public, file_size_limit)
 values ('ai-imports', 'ai-imports', false, 10485760)
 on conflict (id) do nothing;
@@ -248,7 +362,7 @@ create policy "Users can read own imports"
   to authenticated
   using (bucket_id = 'ai-imports' and (select auth.uid())::text = (storage.foldername(name))[1]);
 
--- 9. Storage bucket for avatars
+-- 10. Storage bucket for avatars
 insert into storage.buckets (id, name, public, file_size_limit)
 values ('avatars', 'avatars', true, 5242880)
 on conflict (id) do nothing;

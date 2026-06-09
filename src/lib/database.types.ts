@@ -54,7 +54,7 @@ export interface Database {
         Row: {
           id: string;
           bank_id: string;
-          type: 'SINGLE' | 'MULTIPLE' | 'TRUE_FALSE';
+          type: 'SINGLE' | 'MULTIPLE' | 'TRUE_FALSE' | 'FILL_BLANK' | 'SHORT_ANSWER';
           content: string;
           options: Json;
           answer: string;
@@ -66,7 +66,7 @@ export interface Database {
         };
         Insert: {
           bank_id: string;
-          type: 'SINGLE' | 'MULTIPLE' | 'TRUE_FALSE';
+          type: 'SINGLE' | 'MULTIPLE' | 'TRUE_FALSE' | 'FILL_BLANK' | 'SHORT_ANSWER';
           content: string;
           options?: Json;
           answer: string;
@@ -75,7 +75,7 @@ export interface Database {
           tags?: Json;
         };
         Update: {
-          type?: 'SINGLE' | 'MULTIPLE' | 'TRUE_FALSE';
+          type?: 'SINGLE' | 'MULTIPLE' | 'TRUE_FALSE' | 'FILL_BLANK' | 'SHORT_ANSWER';
           content?: string;
           options?: Json;
           answer?: string;

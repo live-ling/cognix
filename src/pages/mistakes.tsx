@@ -6,10 +6,12 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { supabase } from '@/lib/supabase';
+import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
 import type { Mistake, Bank } from '@/lib/types';
 
 export function Mistakes() {
   const navigate = useNavigate();
+  const { user } = useSupabaseAuth();
   const [mistakes, setMistakes] = useState<Mistake[]>([]);
   const [banks, setBanks] = useState<Bank[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,7 +40,7 @@ export function Mistakes() {
 
     const [{ data: m, error: err1 }, { data: b }] = await Promise.all([
       query,
-      supabase.from('banks').select('*').order('created_at', { ascending: false }),
+      user ? supabase.from('banks').select('*').eq('user_id', user.id).order('created_at', { ascending: false }) : Promise.resolve({ data: [], error: null }),
     ]);
 
     if (err1) setError(err1.message);
@@ -51,10 +53,17 @@ export function Mistakes() {
         bank_id: q?.bank_id,
         question: q ? {
           id: q.id,
-          type: q.type === 'SINGLE' ? 'single' : q.type === 'MULTIPLE' ? 'multiple' : 'judgement',
+          type: q.type === 'SINGLE' ? 'single'
+            : q.type === 'MULTIPLE' ? 'multiple'
+            : q.type === 'TRUE_FALSE' ? 'judgement'
+            : q.type === 'FILL_BLANK' ? 'fill_blank'
+            : q.type === 'SHORT_ANSWER' ? 'short_answer'
+            : 'single',
           stem: q.content || '',
           options: q.options || [],
-          answers: q.type === 'MULTIPLE' ? (q.answer || '').split('') : [q.answer || ''],
+          answers: q.type === 'MULTIPLE' ? (q.answer || '').split('')
+            : q.type === 'FILL_BLANK' ? (() => { try { return JSON.parse(q.answer || '[]'); } catch { return [q.answer || '']; } })()
+            : [q.answer || ''],
           analysis: q.explanation,
         } : undefined,
       };

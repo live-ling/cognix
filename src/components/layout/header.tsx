@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
-import { Menu, X, Sun, Moon, User, LogOut, ChevronDown } from "lucide-react"
+import { Menu, X, Sun, Moon, User, LogOut, ChevronDown, Shield } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
 import { useTheme } from "@/contexts/ThemeContext"
 import { useSupabaseAuth } from "@/contexts/SupabaseAuthContext"
@@ -25,7 +25,7 @@ export function Header() {
   const [scrolled, setScrolled] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const { theme, toggleTheme } = useTheme()
-  const { user, logout } = useSupabaseAuth()
+  const { user, logout, isAdmin } = useSupabaseAuth()
   const userMenuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -146,6 +146,16 @@ export function Header() {
                     <User className="h-4 w-4" />
                     个人主页
                   </Link>
+                  {isAdmin && (
+                    <Link
+                      to="/admin"
+                      className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent transition-colors text-warning"
+                      onClick={() => setUserMenuOpen(false)}
+                    >
+                      <Shield className="h-4 w-4" />
+                      管理后台
+                    </Link>
+                  )}
                   <button
                     type="button"
                     onClick={handleLogout}
@@ -214,6 +224,15 @@ export function Header() {
                   <User className="h-4 w-4" />
                   个人主页
                 </Link>
+                {isAdmin && (
+                  <Link
+                    to="/admin"
+                    className="px-3 py-2 text-sm rounded-md text-warning hover:bg-accent/50 flex items-center gap-2"
+                  >
+                    <Shield className="h-4 w-4" />
+                    管理后台
+                  </Link>
+                )}
                 <button
                   type="button"
                   onClick={handleLogout}

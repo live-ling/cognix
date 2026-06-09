@@ -3,7 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Plus, Pencil, Trash2, BookOpen,
   Upload, Sparkles, Loader2, CheckCircle2, FileText, X,
-  CheckSquare, Square, MinusSquare, Globe,
+  CheckSquare, Square, MinusSquare, Globe, Clock,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -27,12 +27,16 @@ const typeMap: Record<string, string> = {
   single: '单选',
   multiple: '多选',
   judgement: '判断',
+  fill_blank: '填空',
+  short_answer: '简答',
 };
 
 const SYSTEM_PROMPT = `你是一个专业的题目解析助手。你需要将文本中的所有题目转换为统一的 JSON 格式。规则：
-- type 只能是 "single"、"multiple"、"judgement"
+- type 可以是 "single"、"multiple"、"judgement"、"fill_blank"、"short_answer"
 - single 的 answers 如 ["A"]，multiple 如 ["A","C"]，judgement 如 ["正确"]
 - judgement 的 options 必须是 ["正确", "错误"]
+- fill_blank 的 options 为 []，answers 为 JSON 数组如 ["北京","上海"]，题干中用 ____ 标记填空
+- short_answer 的 options 为 []，answers 为 [参考答案文本]
 - options 格式为 "A. xxx"、"B. xxx"
 - 已有题目提取全部，题型与原文一致，答案以原文为准
 - 只返回 JSON 数组，不要其他文字`;
@@ -94,7 +98,7 @@ export function BankDetail() {
   const [pasteText, setPasteText] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<{ file_id: string; filename: string; preview: string; char_count: number } | null>(null);
-  const [materialCounts, setMaterialCounts] = useState({ single: 5, multiple: 3, judgement: 2 });
+  const [materialCounts, setMaterialCounts] = useState({ single: 5, multiple: 3, judgement: 2, fill_blank: 0, short_answer: 0 });
   const [generating, setGenerating] = useState(false);
   const [importError, setImportError] = useState('');
   const [generatedQuestions, setGeneratedQuestions] = useState<any[]>([]);
@@ -115,6 +119,7 @@ export function BankDetail() {
   };
 
   useEffect(() => { fetchData(); }, [id]);
+  useEffect(() => { fetchShareRequest(); }, [id, user]);
 
   const handleDelete = async () => {
     if (!deleteId) return;
@@ -156,19 +161,78 @@ export function BankDetail() {
     else { setEditingBank(false); fetchData(); }
   };
 
+  // Share request state
+  const [shareRequestStatus, setShareRequestStatus] = useState<string | null>(null);
+  const [shareLoading, setShareLoading] = useState(false);
+
+  // Fetch share request status for this bank
+  const fetchShareRequest = async () => {
+    if (!id || !user) return;
+    const { data } = await supabase
+      .from('share_requests')
+      .select('status')
+      .eq('bank_id', id)
+      .eq('user_id', user.id)
+      .in('status', ['pending', 'rejected'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    setShareRequestStatus(data?.status || null);
+  };
+
   // Toggle share bank to square
-  const handleToggleShare = () => {
-    if (!id || !bank) return;
-    setShareConfirmOpen(true);
+  const handleToggleShare = async () => {
+    if (!id || !bank || !user) return;
+    const isShared = (bank as any).is_shared;
+
+    // Admin: directly toggle
+    if (user.role === 'admin') {
+      setShareConfirmOpen(true);
+      return;
+    }
+
+    // Special user: create share request
+    if (user.role === 'special') {
+      if (isShared) {
+        // Already shared, allow unshare
+        setShareConfirmOpen(true);
+        return;
+      }
+      setShareLoading(true);
+      const { error } = await supabase.from('share_requests').insert({
+        bank_id: id,
+        user_id: user.id,
+      });
+      if (error) {
+        alert('申请失败: ' + error.message);
+      } else {
+        setShareRequestStatus('pending');
+        alert('分享申请已提交，等待管理员审核');
+      }
+      setShareLoading(false);
+      return;
+    }
   };
 
   const confirmToggleShare = async () => {
-    if (!id || !bank) return;
+    if (!id || !bank || !user) return;
     const isShared = (bank as any).is_shared;
-    const { error } = await supabase.from('banks').update({ is_shared: !isShared }).eq('id', id);
-    if (error) { alert(error.message); return; }
-    setShareConfirmOpen(false);
-    fetchData();
+
+    if (user.role === 'admin') {
+      const { error } = await supabase.from('banks').update({ is_shared: !isShared }).eq('id', id);
+      if (error) { alert(error.message); return; }
+      setShareConfirmOpen(false);
+      fetchData();
+      return;
+    }
+
+    if (user.role === 'special' && isShared) {
+      // Unshare
+      const { error } = await supabase.from('banks').update({ is_shared: false }).eq('id', id);
+      if (error) { alert(error.message); return; }
+      setShareConfirmOpen(false);
+      fetchData();
+    }
   };
 
   // Bank delete
@@ -187,7 +251,7 @@ export function BankDetail() {
     setImportError('');
     setGeneratedQuestions([]);
     setImportResult(null);
-    setMaterialCounts({ single: 5, multiple: 3, judgement: 2 });
+    setMaterialCounts({ single: 5, multiple: 3, judgement: 2, fill_blank: 0, short_answer: 0 });
     setInputMode('paste');
     setImportMode('questions');
   };
@@ -240,13 +304,15 @@ export function BankDetail() {
       const text = fileText || pasteText.trim();
       let userPrompt: string;
       if (isQuestionsMode) {
-        userPrompt = `请仔细阅读以下文本，提取其中**所有题目**并转换为标准格式。\n要求：\n- 题型必须与原文一致（单选题→single，多选题→multiple，判断题→judgement）\n- 答案必须与原文标注的一致\n\n文本内容：\n${text}`;
+        userPrompt = `请仔细阅读以下文本，提取其中**所有题目**并转换为标准格式。\n要求：\n- 题型必须与原文一致（单选题→single，多选题→multiple，判断题→judgement，填空题→fill_blank，简答题→short_answer）\n- 答案必须与原文标注的一致\n- fill_blank 的 answers 为 JSON 数组如 ["答案1","答案2"]，options 为 []\n- short_answer 的 answers 为 [参考答案]，options 为 []\n\n文本内容：\n${text}`;
       } else {
-        userPrompt = `请根据以下学习材料内容生成题目。\n具体要求：\n- 单选题：${materialCounts.single} 道\n- 多选题：${materialCounts.multiple} 道\n- 判断题：${materialCounts.judgement} 道\n\n文本内容：\n${text}`;
+        userPrompt = `请根据以下学习材料内容生成题目。\n具体要求：\n- 单选题：${materialCounts.single} 道\n- 多选题：${materialCounts.multiple} 道\n- 判断题：${materialCounts.judgement} 道\n- 填空题：${materialCounts.fill_blank} 道\n- 简答题：${materialCounts.short_answer} 道\n\n填空题要求：题干中用 ____ 标记填空，answers 为填空答案数组。\n简答题要求：answers 为参考答案文本。\n\n文本内容：\n${text}`;
       }
 
       const baseUrl = (user.ai_base_url || 'https://api.openai.com/v1').replace(/\/$/, '');
-      const res = await fetch(`${baseUrl}/chat/completions`, {
+      const url = `${baseUrl}/chat/completions`;
+      try { new URL(url); } catch { throw new Error(`AI 接口地址无效: ${url}`); }
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${user.ai_api_key}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -309,7 +375,7 @@ export function BankDetail() {
   });
 
   const filters = [
-    { key: 'type', value: typeFilter, setter: setTypeFilter, options: { '': '全部题型', single: '单选', multiple: '多选', judgement: '判断' } },
+    { key: 'type', value: typeFilter, setter: setTypeFilter, options: { '': '全部题型', single: '单选', multiple: '多选', judgement: '判断', fill_blank: '填空', short_answer: '简答' } },
     { key: 'difficulty', value: difficultyFilter, setter: setDifficultyFilter, options: { '': '全部难度', easy: '简单', medium: '中等', hard: '困难' } },
   ];
 
@@ -383,7 +449,31 @@ export function BankDetail() {
           )}
         </div>
         <div className="flex gap-2 flex-shrink-0">
-          {!(bank as any).source_bank_id && (
+          {!(bank as any).source_bank_id && user?.role === 'user' && (
+            <Button variant="outline" size="sm" disabled title="需要贡献者权限才能分享">
+              <Globe className="h-3.5 w-3.5 mr-1" />
+              分享到广场
+            </Button>
+          )}
+          {!(bank as any).source_bank_id && user?.role === 'special' && !(bank as any).is_shared && shareRequestStatus !== 'pending' && (
+            <Button variant="outline" size="sm" onClick={handleToggleShare} disabled={shareLoading}>
+              <Globe className="h-3.5 w-3.5 mr-1" />
+              {shareLoading ? '提交中...' : '申请分享到广场'}
+            </Button>
+          )}
+          {!(bank as any).source_bank_id && user?.role === 'special' && shareRequestStatus === 'pending' && (
+            <Button variant="outline" size="sm" disabled>
+              <Clock className="h-3.5 w-3.5 mr-1" />
+              审核中
+            </Button>
+          )}
+          {!(bank as any).source_bank_id && user?.role === 'special' && (bank as any).is_shared && (
+            <Button variant="default" size="sm" onClick={handleToggleShare}>
+              <Globe className="h-3.5 w-3.5 mr-1" />
+              取消分享
+            </Button>
+          )}
+          {!(bank as any).source_bank_id && user?.role === 'admin' && (
             <Button
               variant={(bank as any).is_shared ? 'default' : 'outline'}
               size="sm"
@@ -693,11 +783,13 @@ export function BankDetail() {
 
                 <div>
                   <label className="text-sm font-medium mb-2 block">每种题型生成数量</label>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
                     {[
                       { key: 'single', label: '单选题' },
                       { key: 'multiple', label: '多选题' },
                       { key: 'judgement', label: '判断题' },
+                      { key: 'fill_blank', label: '填空题' },
+                      { key: 'short_answer', label: '简答题' },
                     ].map(({ key, label }) => (
                       <div key={key} className="text-center">
                         <p className="text-xs text-muted-foreground mb-1">{label}</p>
@@ -720,7 +812,7 @@ export function BankDetail() {
                     ))}
                   </div>
                   <p className="text-xs text-muted-foreground text-center mt-2">
-                    共 {materialCounts.single + materialCounts.multiple + materialCounts.judgement} 题
+                    共 {materialCounts.single + materialCounts.multiple + materialCounts.judgement + materialCounts.fill_blank + materialCounts.short_answer} 题
                   </p>
                 </div>
 
@@ -728,7 +820,7 @@ export function BankDetail() {
 
                 <div className="flex gap-2 pt-1">
                   <Button variant="outline" onClick={() => { setImportStep('input'); setImportError(''); }}>返回</Button>
-                  <Button className="flex-1" onClick={() => doGenerate()} disabled={generating || (materialCounts.single + materialCounts.multiple + materialCounts.judgement) === 0}>
+                  <Button className="flex-1" onClick={() => doGenerate()} disabled={generating || (materialCounts.single + materialCounts.multiple + materialCounts.judgement + materialCounts.fill_blank + materialCounts.short_answer) === 0}>
                     {generating ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />AI 生成中...</> : <><Sparkles className="h-4 w-4 mr-2" />开始生成</>}
                   </Button>
                 </div>
@@ -771,6 +863,8 @@ export function BankDetail() {
                           <option value="single">单选</option>
                           <option value="multiple">多选</option>
                           <option value="judgement">判断</option>
+                          <option value="fill_blank">填空</option>
+                          <option value="short_answer">简答</option>
                         </select>
                         <select
                           className="h-7 rounded border border-input bg-background px-1.5 text-xs"
@@ -863,7 +957,9 @@ export function BankDetail() {
             <p className="text-sm text-muted-foreground mb-6">
               {(bank as any)?.is_shared
                 ? '取消分享后，该题库将从广场中移除，其他人将无法再浏览和导入此题库。'
-                : '分享后，其他用户可以在广场中浏览和导入此题库。'}
+                : user?.role === 'admin'
+                  ? '作为管理员，分享将直接生效，无需审核。'
+                  : '分享后，其他用户可以在广场中浏览和导入此题库。'}
             </p>
             <div className="flex justify-end gap-3">
               <Button variant="outline" onClick={() => setShareConfirmOpen(false)}>取消</Button>

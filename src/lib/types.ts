@@ -1,5 +1,5 @@
 // Question types
-export type QuestionType = 'single' | 'multiple' | 'judgement';
+export type QuestionType = 'single' | 'multiple' | 'judgement' | 'fill_blank' | 'short_answer';
 export type Difficulty = 'easy' | 'medium' | 'hard';
 export type PracticeMode = 'sequential' | 'random' | 'mistake';
 
@@ -55,6 +55,7 @@ export interface PracticeQuestion {
   type: string;
   stem: string;
   options: string[];
+  blank_count?: number;
 }
 
 export interface PracticeSubmitResponse {
@@ -62,6 +63,7 @@ export interface PracticeSubmitResponse {
   correct_answers?: string[];
   correct_answer?: string;
   explanation?: string;
+  correct_answers_text?: string;
 }
 
 export interface PracticeFinishDetail {

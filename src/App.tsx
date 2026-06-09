@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { SupabaseAuthProvider } from './contexts/SupabaseAuthContext';
 import { Layout } from './components/layout/layout';
-import { ProtectedRoute } from './components/protected-route';
+import { ProtectedRoute, AdminRoute } from './components/protected-route';
 
 // Lazy-loaded pages
 const Home = lazy(() => import('./pages/home').then(m => ({ default: m.Home })));
@@ -16,6 +16,7 @@ const PracticeSession = lazy(() => import('./pages/practice-session').then(m => 
 const Mistakes = lazy(() => import('./pages/mistakes').then(m => ({ default: m.Mistakes })));
 const Profile = lazy(() => import('./pages/profile').then(m => ({ default: m.Profile })));
 const Square = lazy(() => import('./pages/square').then(m => ({ default: m.Square })));
+const Admin = lazy(() => import('./pages/admin').then(m => ({ default: m.Admin })));
 
 function PageLoader() {
   return (
@@ -51,6 +52,7 @@ function App() {
                 <Route path="/practice/session" element={<ProtectedRoute><PracticeSession /></ProtectedRoute>} />
                 <Route path="/mistakes" element={<ProtectedRoute><Mistakes /></ProtectedRoute>} />
                 <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+                <Route path="/admin" element={<AdminRoute><Admin /></AdminRoute>} />
               </Route>
             </Routes>
           </Suspense>

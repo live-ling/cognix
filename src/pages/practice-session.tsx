@@ -24,6 +24,8 @@ export function PracticeSession() {
   const [questions, setQuestions] = useState<PracticeQuestion[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedAnswers, setSelectedAnswers] = useState<string[]>([]);
+  const [textInputs, setTextInputs] = useState<string[]>([]);
+  const [textareaValue, setTextareaValue] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [result, setResult] = useState<PracticeSubmitResponse | null>(null);
   const [finished, setFinished] = useState(false);
@@ -78,8 +80,28 @@ export function PracticeSession() {
     }
   };
 
+  const handleTextInput = (index: number, value: string) => {
+    setTextInputs((prev) => {
+      const next = [...prev];
+      next[index] = value;
+      return next;
+    });
+  };
+
   const handleSubmit = async () => {
-    if (!currentQuestion || selectedAnswers.length === 0) return;
+    if (!currentQuestion) return;
+    const qtype = currentQuestion.type;
+
+    // Validate inputs based on question type
+    if (qtype === 'fill_blank') {
+      const blanks = currentQuestion.stem.match(/_{2,}/g) || [];
+      if (textInputs.filter(t => t?.trim()).length < blanks.length) return;
+    } else if (qtype === 'short_answer') {
+      if (!textareaValue.trim()) return;
+    } else {
+      if (selectedAnswers.length === 0) return;
+    }
+
     setLoading(true);
     try {
       // Get correct answer from DB
@@ -87,16 +109,28 @@ export function PracticeSession() {
         .from('questions').select('answer, explanation').eq('id', currentQuestion.id).single();
       if (!question) throw new Error('题目不存在');
 
-      const qtype = currentQuestion.type;
       let userAnswer: string;
-      if (qtype === 'multiple') {
+      let isCorrect: boolean;
+
+      if (qtype === 'fill_blank') {
+        const correctAnswers: string[] = (() => { try { return JSON.parse(question.answer); } catch { return [question.answer]; } })();
+        isCorrect = correctAnswers.every(
+          (ans, i) => (textInputs[i] || '').trim() === ans.trim()
+        );
+        userAnswer = textInputs.map(t => t.trim()).join(' | ');
+      } else if (qtype === 'short_answer') {
+        userAnswer = textareaValue.trim();
+        isCorrect = false;
+      } else if (qtype === 'multiple') {
         userAnswer = selectedAnswers.sort().join('');
+        isCorrect = userAnswer === question.answer;
       } else if (qtype === 'judgement') {
         userAnswer = selectedAnswers[0] === 'A' ? '正确' : '错误';
+        isCorrect = userAnswer === question.answer;
       } else {
         userAnswer = selectedAnswers[0];
+        isCorrect = userAnswer === question.answer;
       }
-      const isCorrect = userAnswer === question.answer;
 
       // Save practice detail
       await supabase.from('practice_details').insert({
@@ -124,11 +158,17 @@ export function PracticeSession() {
         }
       }
 
-      setResult({
-        is_correct: isCorrect,
-        correct_answers: qtype === 'multiple' ? question.answer.split('') : [question.answer],
-        explanation: question.explanation,
-      });
+      // Build result
+      if (qtype === 'fill_blank') {
+        const correctAnswers: string[] = (() => { try { return JSON.parse(question.answer); } catch { return [question.answer]; } })();
+        setResult({ is_correct: isCorrect, correct_answers: correctAnswers, explanation: question.explanation });
+      } else if (qtype === 'short_answer') {
+        setResult({ is_correct: false, correct_answers_text: question.answer, explanation: question.explanation });
+      } else if (qtype === 'multiple') {
+        setResult({ is_correct: isCorrect, correct_answers: question.answer.split(''), explanation: question.explanation });
+      } else {
+        setResult({ is_correct: isCorrect, correct_answers: [question.answer], explanation: question.explanation });
+      }
       setSubmitted(true);
     } catch (err: any) {
       alert(err.message);
@@ -192,6 +232,8 @@ export function PracticeSession() {
     } else {
       setCurrentIndex((i) => i + 1);
       setSelectedAnswers([]);
+      setTextInputs([]);
+      setTextareaValue('');
       setSubmitted(false);
       setResult(null);
     }
@@ -336,6 +378,10 @@ export function PracticeSession() {
           submitted={submitted}
           result={result}
           options={currentQuestion.options?.map((o, i) => o ? `${OPTION_LABELS[i]}. ${o}` : '')?.filter(Boolean)}
+          textInputs={textInputs}
+          onTextInput={handleTextInput}
+          textareaValue={textareaValue}
+          onTextareaChange={setTextareaValue}
         />
       )}
 
@@ -344,7 +390,13 @@ export function PracticeSession() {
         {!submitted ? (
           <Button
             onClick={handleSubmit}
-            disabled={loading || selectedAnswers.length === 0}
+            disabled={loading || (
+              currentQuestion?.type === 'fill_blank'
+                ? textInputs.filter(t => t?.trim()).length < ((currentQuestion.stem.match(/_{2,}/g) || []).length)
+                : currentQuestion?.type === 'short_answer'
+                  ? !textareaValue.trim()
+                  : selectedAnswers.length === 0
+            )}
           >
             {loading ? '提交中...' : '提交答案'}
           </Button>

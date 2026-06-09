@@ -8,9 +8,11 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { supabase } from '@/lib/supabase';
 import { dbToBank } from '@/lib/question-utils';
+import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
 import type { Bank } from '@/lib/types';
 
 export function BankList() {
+  const { user } = useSupabaseAuth();
   const [banks, setBanks] = useState<Bank[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -21,9 +23,10 @@ export function BankList() {
   const [creating, setCreating] = useState(false);
 
   const fetchBanks = async () => {
+    if (!user) return;
     setLoading(true);
     setError(null);
-    let query = supabase.from('banks').select('*, questions(count)').order('created_at', { ascending: false });
+    let query = supabase.from('banks').select('*, questions(count)').eq('user_id', user.id).order('created_at', { ascending: false });
     if (search.trim()) query = query.ilike('title', `%${search.trim()}%`);
     const { data, error: err } = await query;
     if (err) { setError(err.message); setLoading(false); return; }

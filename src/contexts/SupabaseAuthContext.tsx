@@ -9,6 +9,9 @@ export interface AppUser {
   email: string;
   bio: string;
   avatar_url: string;
+  role: 'user' | 'special' | 'admin';
+  status: 'active' | 'banned';
+  special_applied_at: string | null;
   ai_configured: boolean;
   ai_api_key: string;
   ai_base_url: string;
@@ -26,6 +29,8 @@ interface AuthContextType {
   user: AppUser | null;
   session: Session | null;
   loading: boolean;
+  isAdmin: boolean;
+  isSpecial: boolean;
   login: (email: string, password: string) => Promise<AppUser>;
   /** Login with email or username — looks up email from profiles if a username is given */
   loginByIdentifier: (identifier: string, password: string) => Promise<AppUser>;
@@ -47,16 +52,20 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const buildUser = (s: Session | null, profile?: any): AppUser | null => {
+  const buildUser = (s: Session | null, profile?: any, decryptedApiKey?: string): AppUser | null => {
     if (!s?.user) return null;
     const p = profile || {};
+    const apiKey = decryptedApiKey ?? (p.ai_api_key || '');
     return {
       id: s.user.id,
       name: p.name || s.user.user_metadata?.name || s.user.email?.split('@')[0] || '',
       email: s.user.email || '',
       bio: p.bio || '',
-      ai_configured: !!p.ai_api_key,
-      ai_api_key: p.ai_api_key || '',
+      role: p.role || 'user',
+      status: p.status || 'active',
+      special_applied_at: p.special_applied_at || null,
+      ai_configured: !!apiKey,
+      ai_api_key: apiKey,
       ai_base_url: p.ai_base_url || '',
       avatar_url: p.avatar_url || '',
       ai_model: p.ai_model || '',
@@ -73,20 +82,29 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     return data;
   };
 
+  const fetchDecryptedApiKey = async (): Promise<string> => {
+    const { data, error } = await supabase.rpc('get_ai_api_key');
+    if (error) {
+      console.error('[fetchDecryptedApiKey] RPC error:', error);
+      return '';
+    }
+    return (data || '').trim();
+  };
+
   const refreshUser = async () => {
     const { data: { session: s } } = await supabase.auth.getSession();
     if (!s) { setUser(null); setSession(null); return; }
     setSession(s);
-    const profile = await fetchProfile(s.user.id);
-    setUser(buildUser(s, profile));
+    const [profile, apiKey] = await Promise.all([fetchProfile(s.user.id), fetchDecryptedApiKey()]);
+    setUser(buildUser(s, profile, apiKey));
   };
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session: s } }) => {
       setSession(s);
       if (s) {
-        const profile = await fetchProfile(s.user.id);
-        setUser(buildUser(s, profile));
+        const [profile, apiKey] = await Promise.all([fetchProfile(s.user.id), fetchDecryptedApiKey()]);
+        setUser(buildUser(s, profile, apiKey));
       } else {
         setUser(null);
       }
@@ -96,8 +114,8 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, s) => {
       setSession(s);
       if (s) {
-        const profile = await fetchProfile(s.user.id);
-        setUser(buildUser(s, profile));
+        const [profile, apiKey] = await Promise.all([fetchProfile(s.user.id), fetchDecryptedApiKey()]);
+        setUser(buildUser(s, profile, apiKey));
       } else {
         setUser(null);
       }
@@ -111,8 +129,8 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string): Promise<AppUser> => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw new Error(error.message === 'Invalid login credentials' ? '邮箱或密码错误' : error.message);
-    const profile = await fetchProfile(data.user!.id);
-    const u = buildUser(data.session, profile)!;
+    const [profile, apiKey] = await Promise.all([fetchProfile(data.user!.id), fetchDecryptedApiKey()]);
+    const u = buildUser(data.session, profile, apiKey)!;
     setUser(u);
     setSession(data.session);
     return u;
@@ -160,8 +178,8 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 
     // Auto-login (email confirmation not required)
     await new Promise((r) => setTimeout(r, 500));
-    const profile = await fetchProfile(data.user!.id);
-    const u = buildUser(data.session, profile)!;
+    const [profile, apiKey] = await Promise.all([fetchProfile(data.user!.id), fetchDecryptedApiKey()]);
+    const u = buildUser(data.session, profile, apiKey)!;
     setUser(u);
     setSession(data.session);
     return { success: true, user: u };
@@ -185,8 +203,8 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     }
     // Fetch profile (trigger may need a moment)
     await new Promise((r) => setTimeout(r, 300));
-    const profile = await fetchProfile(data.user!.id);
-    const u = buildUser(data.session, profile)!;
+    const [profile, apiKey] = await Promise.all([fetchProfile(data.user!.id), fetchDecryptedApiKey()]);
+    const u = buildUser(data.session, profile, apiKey)!;
     setUser(u);
     setSession(data.session);
     return u;
@@ -240,9 +258,12 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     setSession(null);
   };
 
+  const isAdmin = user?.role === 'admin';
+  const isSpecial = user?.role === 'special' || isAdmin;
+
   return (
     <AuthContext.Provider value={{
-      user, session, loading,
+      user, session, loading, isAdmin, isSpecial,
       login, loginByIdentifier, register,
       verifyRegistrationOtp, sendPasswordResetOtp, verifyPasswordResetOtp,
       logout, refreshUser,

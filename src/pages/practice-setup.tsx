@@ -7,11 +7,13 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { supabase } from '@/lib/supabase';
 import { dbToBank } from '@/lib/question-utils';
+import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
 import type { Bank } from '@/lib/types';
 
 export function PracticeSetup() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useSupabaseAuth();
   const preSelectedBankId = (location.state as any)?.bankId;
 
   const [banks, setBanks] = useState<Bank[]>([]);
@@ -23,10 +25,11 @@ export function PracticeSetup() {
   const [starting, setStarting] = useState(false);
 
   useEffect(() => {
+    if (!user) return;
     (async () => {
       setLoading(true);
       setError(null);
-      const { data, error: err } = await supabase.from('banks').select('*, questions(count)').order('created_at', { ascending: false });
+      const { data, error: err } = await supabase.from('banks').select('*, questions(count)').eq('user_id', user.id).order('created_at', { ascending: false });
       if (err) { setError(err.message); setLoading(false); return; }
       const list = (data || []).map((row: any) => dbToBank({ ...row, question_count: row.questions?.[0]?.count || 0 }));
       setBanks(list);
@@ -37,7 +40,7 @@ export function PracticeSetup() {
       }
       setLoading(false);
     })();
-  }, [preSelectedBankId]);
+  }, [preSelectedBankId, user]);
 
   const handleStart = async () => {
     if (!selectedBank) return;
