@@ -1,7 +1,7 @@
 // Question types
 export type QuestionType = 'single' | 'multiple' | 'judgement' | 'fill_blank' | 'short_answer';
 export type Difficulty = 'easy' | 'medium' | 'hard';
-export type PracticeMode = 'sequential' | 'random' | 'mistake';
+export type PracticeMode = 'sequential' | 'random' | 'mistake' | 'challenge';
 
 // Bank
 export interface Bank {
@@ -66,6 +66,24 @@ export interface PracticeSubmitResponse {
   correct_answers_text?: string;
 }
 
+// Batch answer record stored per question before final submission
+export interface AnswerRecord {
+  selectedAnswers: string[];
+  textInputs: string[];
+  textareaValue: string;
+  timeSpent: number;
+}
+
+// Per-question result after batch submission
+export interface QuestionResult {
+  questionId: string;
+  userAnswer: string;
+  isCorrect: boolean;
+  correctAnswer: string;
+  explanation?: string;
+  timeSpent: number;
+}
+
 export interface PracticeFinishDetail {
   stem?: string;
   content?: string;
@@ -102,6 +120,7 @@ export interface DashboardStats {
   total_questions: number;
   avg_accuracy: number;
   max_streak: number;
+  challenge_record: number;
   heatmap?: { date: string; count: number }[];
   recent_sessions?: {
     date: string;

@@ -6,7 +6,7 @@ import {
   User, Edit3, Save, X, Upload, Camera,
   BarChart3, Star, Award, Settings, Plug, Lock,
   CheckCircle, XCircle, Loader2, Eye, EyeOff,
-  BookOpen, Clock, Flame, Target, TrendingUp, Zap,
+  BookOpen, Clock, Flame, Target, TrendingUp, Zap, Trophy,
   RotateCcw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -561,15 +561,23 @@ export function Profile() {
                 </div>
               </div>
             </div>
-            <button
-              type="button"
-              className={`hidden sm:flex flex-shrink-0 items-center gap-2 px-4 py-2.5 rounded-lg ${level.color} cursor-pointer hover:opacity-80 transition-opacity`}
-              onClick={() => setLevelModalOpen(true)}
-              title="查看等级详情"
-            >
-              <LevelIcon className="h-5 w-5" />
-              <span className="font-semibold text-sm">{level.name}</span>
-            </button>
+            <div className="hidden sm:flex flex-shrink-0 flex-col items-end gap-1.5">
+              <button
+                type="button"
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-lg ${level.color} cursor-pointer hover:opacity-80 transition-opacity`}
+                onClick={() => setLevelModalOpen(true)}
+                title="查看等级详情"
+              >
+                <LevelIcon className="h-5 w-5" />
+                <span className="font-semibold text-sm">{level.name}</span>
+              </button>
+              {(stats?.challenge_record ?? 0) > 0 && (
+                <span className="flex items-center gap-1 text-xs text-yellow-600 bg-yellow-500/10 px-2.5 py-1 rounded-full">
+                  <Trophy className="h-3.5 w-3.5" />
+                  最高挑战 {stats?.challenge_record} 题
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -579,12 +587,13 @@ export function Profile() {
 
         {/* Stats card */}
         <div className="glass-card rounded-xl p-5">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             {[
               { icon: BookOpen, color: 'text-blue-500', bg: 'bg-blue-500/10', value: stats?.today_answered ?? 0, label: '今日答题' },
               { icon: CheckCircle, color: 'text-green-500', bg: 'bg-green-500/10', value: stats?.accuracy != null ? `${(stats.accuracy * 100).toFixed(0)}%` : '0%', label: '正确率' },
               { icon: Flame, color: 'text-orange-500', bg: 'bg-orange-500/10', value: `${stats?.streak_days ?? 0} 天`, label: '连续学习' },
               { icon: Target, color: 'text-purple-500', bg: 'bg-purple-500/10', value: stats?.bank_count ?? 0, label: '题库总数' },
+              { icon: Zap, color: 'text-yellow-500', bg: 'bg-yellow-500/10', value: `${stats?.challenge_record ?? 0} 题`, label: '最高挑战' },
             ].map(({ icon: Icon, color, bg, value, label }) => (
               <div key={label} className="flex items-center gap-3">
                 <div className={`w-10 h-10 rounded-lg ${bg} flex items-center justify-center flex-shrink-0`}>
@@ -629,7 +638,7 @@ export function Profile() {
                       {stats.recent_sessions.map((s, i) => (
                         <tr key={i} className="border-b border-border/30 hover:bg-accent/30 transition-colors">
                           <td className="py-2 px-3">{s.date}</td>
-                          <td className="py-2 px-3 capitalize">{s.mode ?? '-'}</td>
+                          <td className="py-2 px-3">{({ sequential: '顺序', random: '随机', mistake: '错题', challenge: '挑战' } as Record<string, string>)[s.mode] ?? s.mode ?? '-'}</td>
                           <td className="py-2 px-3">
                             <Badge variant={s.accuracy >= 0.8 ? 'success' : s.accuracy >= 0.6 ? 'warning' : 'destructive'}>
                               {s.correct}/{s.total} ({(s.accuracy * 100).toFixed(0)}%)
@@ -958,6 +967,20 @@ export function Profile() {
               </div>
             );
           })})()}
+          {/* Challenge record */}
+          <div className="flex items-center gap-3 p-3 rounded-lg bg-yellow-500/5 border border-yellow-500/20 mt-2">
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-yellow-500/10 text-yellow-600">
+              <Trophy className="h-4 w-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">挑战模式</p>
+              <p className="text-xs text-muted-foreground">最高连续答对记录</p>
+            </div>
+            <div className="text-right flex-shrink-0">
+              <span className="text-lg font-bold text-yellow-600">{stats?.challenge_record ?? 0}</span>
+              <span className="text-xs text-muted-foreground ml-1">题</span>
+            </div>
+          </div>
         </div>
       </Modal>
 

@@ -217,7 +217,7 @@ create table public.practice_sessions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   bank_id uuid not null references public.banks(id) on delete cascade,
-  mode text not null default 'random' check (mode in ('sequential', 'random', 'mistake')),
+  mode text not null default 'random' check (mode in ('sequential', 'random', 'mistake', 'challenge')),
   total_count int not null default 0,
   correct_count int not null default 0,
   time_spent int not null default 0,
@@ -310,7 +310,26 @@ create policy "Users can CRUD own learning logs"
   with check ((select auth.uid()) = user_id);
 
 
--- 8. Share Requests (审批分享申请)
+-- 8. Challenge Records (best streak per user)
+create table public.challenge_records (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  best_streak int not null default 0,
+  total_questions int not null default 0,
+  updated_at timestamptz default now(),
+  unique(user_id)
+);
+
+alter table public.challenge_records enable row level security;
+
+create policy "Users can CRUD own challenge records"
+  on public.challenge_records for all
+  to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
+
+-- 9. Share Requests (审批分享申请)
 create table public.share_requests (
   id uuid primary key default gen_random_uuid(),
   bank_id uuid not null references public.banks(id) on delete cascade,
@@ -347,7 +366,7 @@ create policy "Admin can update share requests"
   using (public.get_current_user_role() = 'admin');
 
 
--- 9. Storage bucket for AI imports
+-- 10. Storage bucket for AI imports
 insert into storage.buckets (id, name, public, file_size_limit)
 values ('ai-imports', 'ai-imports', false, 10485760)
 on conflict (id) do nothing;
@@ -362,7 +381,7 @@ create policy "Users can read own imports"
   to authenticated
   using (bucket_id = 'ai-imports' and (select auth.uid())::text = (storage.foldername(name))[1]);
 
--- 10. Storage bucket for avatars
+-- 11. Storage bucket for avatars
 insert into storage.buckets (id, name, public, file_size_limit)
 values ('avatars', 'avatars', true, 5242880)
 on conflict (id) do nothing;
@@ -386,7 +405,7 @@ create policy "Users can delete own avatar"
   to authenticated
   using (bucket_id = 'avatars' and (select auth.uid())::text = (storage.foldername(name))[1]);
 
--- 10. Cleanup unused avatars function (run periodically via cron or manually)
+-- 12. Cleanup unused avatars function (run periodically via cron or manually)
 create or replace function public.cleanup_unused_avatars()
 returns void
 language plpgsql
@@ -425,20 +444,20 @@ as $$
     'accuracy', coalesce((select round(sum(correct)::decimal / nullif(sum(count), 0)::decimal, 2) from public.learning_logs where user_id = (select id from uid) and date = current_date), 0),
     'streak_days', (
       with dates as (
-        select date from public.learning_logs where user_id = (select id from uid) and count > 0 order by date desc
-      )
-      select count(*) from (
-        select date, date - row_number() over (order by date desc)::int as grp from dates
-      ) d where grp = (select max(date - row_number() over (order by date desc)::int) from dates)
+        select date, date - row_number() over (order by date desc)::int as grp
+        from public.learning_logs where user_id = (select id from uid) and count > 0
+      ),
+      latest_grp as (select grp from dates order by date desc limit 1)
+      select count(*) from dates where grp = (select grp from latest_grp)
     ),
     'bank_count', coalesce((select count(*) from public.banks where user_id = (select id from uid)), 0),
     'total_questions', coalesce((select count(*) from public.questions q join public.banks b on q.bank_id = b.id where b.user_id = (select id from uid)), 0),
     'avg_accuracy', coalesce((select round(sum(correct)::decimal / nullif(sum(count), 0)::decimal, 2) from public.learning_logs where user_id = (select id from uid)), 0),
     'max_streak', 0,
+    'challenge_record', coalesce((select best_streak from public.challenge_records where user_id = (select id from uid)), 0),
     'heatmap', coalesce((
-      select jsonb_agg(jsonb_build_object('date', date, 'count', count))
-      from public.learning_logs where user_id = (select id from uid) and date >= current_date - interval '6 months'
-      order by date
+      select jsonb_agg(jsonb_build_object('date', d, 'count', c))
+      from (select date as d, count as c from public.learning_logs where user_id = (select id from uid) and date >= current_date - interval '6 months' order by date) t
     ), '[]'::jsonb),
     'recent_sessions', coalesce((
       select jsonb_agg(jsonb_build_object(
