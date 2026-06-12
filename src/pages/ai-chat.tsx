@@ -202,6 +202,7 @@ export function AiChat() {
   };
 
   const createSession = async (): Promise<string> => {
+    if (!user) throw new Error('Not logged in');
     const { data, error } = await supabase
       .from('chat_sessions')
       .insert({ title: '新对话', user_id: user.id })
@@ -533,8 +534,10 @@ export function AiChat() {
               <MessageSquare className="h-3.5 w-3.5 flex-shrink-0" />
               <span className="truncate flex-1">{s.title}</span>
               <button
+                type="button"
                 className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
                 onClick={(e) => { e.stopPropagation(); deleteSession(s.id); }}
+                title="删除对话"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
