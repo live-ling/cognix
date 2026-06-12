@@ -204,7 +204,7 @@ export function AiChat() {
   const createSession = async (): Promise<string> => {
     const { data, error } = await supabase
       .from('chat_sessions')
-      .insert({ title: '新对话' })
+      .insert({ title: '新对话', user_id: user.id })
       .select('id')
       .single();
     if (error) throw error;
