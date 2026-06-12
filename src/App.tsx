@@ -17,6 +17,7 @@ const Mistakes = lazy(() => import('./pages/mistakes').then(m => ({ default: m.M
 const Profile = lazy(() => import('./pages/profile').then(m => ({ default: m.Profile })));
 const Square = lazy(() => import('./pages/square').then(m => ({ default: m.Square })));
 const Admin = lazy(() => import('./pages/admin').then(m => ({ default: m.Admin })));
+const AiChat = lazy(() => import('./pages/ai-chat').then(m => ({ default: m.AiChat })));
 
 function PageLoader() {
   return (
@@ -52,6 +53,7 @@ function App() {
                 <Route path="/practice/session" element={<ProtectedRoute><PracticeSession /></ProtectedRoute>} />
                 <Route path="/mistakes" element={<ProtectedRoute><Mistakes /></ProtectedRoute>} />
                 <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+                <Route path="/ai-chat" element={<ProtectedRoute><AiChat /></ProtectedRoute>} />
                 <Route path="/admin" element={<AdminRoute><Admin /></AdminRoute>} />
               </Route>
             </Routes>

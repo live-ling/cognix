@@ -146,3 +146,20 @@ export interface PaginatedResponse<T> {
   page_size: number;
   has_next: boolean;
 }
+
+// Chat
+export interface ChatSession {
+  id: string;
+  user_id: string;
+  title: string;
+  created_at: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  session_id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  question_id?: string;
+  created_at: string;
+}

@@ -16,6 +16,8 @@ export interface AppUser {
   ai_api_key: string;
   ai_base_url: string;
   ai_model: string;
+  mimo_configured: boolean;
+  mimo_api_key: string;
   created_at: string;
 }
 
@@ -52,10 +54,11 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const buildUser = (s: Session | null, profile?: any, decryptedApiKey?: string): AppUser | null => {
+  const buildUser = (s: Session | null, profile?: any, decryptedApiKey?: string, decryptedMimoKey?: string): AppUser | null => {
     if (!s?.user) return null;
     const p = profile || {};
     const apiKey = decryptedApiKey ?? (p.ai_api_key || '');
+    const mimoKey = decryptedMimoKey ?? (p.mimo_api_key || '');
     return {
       id: s.user.id,
       name: p.name || s.user.user_metadata?.name || s.user.email?.split('@')[0] || '',
@@ -69,6 +72,8 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       ai_base_url: p.ai_base_url || '',
       avatar_url: p.avatar_url || '',
       ai_model: p.ai_model || '',
+      mimo_configured: !!mimoKey,
+      mimo_api_key: mimoKey,
       created_at: s.user.created_at || '',
     };
   };
@@ -91,20 +96,29 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     return (data || '').trim();
   };
 
+  const fetchDecryptedMimoKey = async (): Promise<string> => {
+    const { data, error } = await supabase.rpc('get_mimo_api_key');
+    if (error) {
+      console.error('[fetchDecryptedMimoKey] RPC error:', error);
+      return '';
+    }
+    return (data || '').trim();
+  };
+
   const refreshUser = async () => {
     const { data: { session: s } } = await supabase.auth.getSession();
     if (!s) { setUser(null); setSession(null); return; }
     setSession(s);
-    const [profile, apiKey] = await Promise.all([fetchProfile(s.user.id), fetchDecryptedApiKey()]);
-    setUser(buildUser(s, profile, apiKey));
+    const [profile, apiKey, mimoKey] = await Promise.all([fetchProfile(s.user.id), fetchDecryptedApiKey(), fetchDecryptedMimoKey()]);
+    setUser(buildUser(s, profile, apiKey, mimoKey));
   };
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session: s } }) => {
       setSession(s);
       if (s) {
-        const [profile, apiKey] = await Promise.all([fetchProfile(s.user.id), fetchDecryptedApiKey()]);
-        setUser(buildUser(s, profile, apiKey));
+        const [profile, apiKey, mimoKey] = await Promise.all([fetchProfile(s.user.id), fetchDecryptedApiKey(), fetchDecryptedMimoKey()]);
+        setUser(buildUser(s, profile, apiKey, mimoKey));
       } else {
         setUser(null);
       }
@@ -114,8 +128,8 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, s) => {
       setSession(s);
       if (s) {
-        const [profile, apiKey] = await Promise.all([fetchProfile(s.user.id), fetchDecryptedApiKey()]);
-        setUser(buildUser(s, profile, apiKey));
+        const [profile, apiKey, mimoKey] = await Promise.all([fetchProfile(s.user.id), fetchDecryptedApiKey(), fetchDecryptedMimoKey()]);
+        setUser(buildUser(s, profile, apiKey, mimoKey));
       } else {
         setUser(null);
       }

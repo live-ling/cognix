@@ -6,7 +6,7 @@ import {
   User, Edit3, Save, X, Upload, Camera,
   BarChart3, Star, Award, Settings, Plug, Lock,
   CheckCircle, XCircle, Loader2, Eye, EyeOff,
-  BookOpen, Clock, Flame, Target, TrendingUp, Zap, Trophy,
+  BookOpen, Clock, Flame, Target, TrendingUp, Zap, Trophy, Mic,
   RotateCcw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -111,6 +111,15 @@ export function Profile() {
   const [aiTestResult, setAiTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [customBaseUrl, setCustomBaseUrl] = useState('');
   const [aiCustomModel, setAiCustomModel] = useState('');
+
+  // MiMo voice state
+  const [mimoModalOpen, setMimoModalOpen] = useState(false);
+  const [mimoKey, setMimoKey] = useState('');
+  const [showMimoKey, setShowMimoKey] = useState(false);
+  const [mimoSaving, setMimoSaving] = useState(false);
+  const [mimoError, setMimoError] = useState('');
+  const [mimoTesting, setMimoTesting] = useState(false);
+  const [mimoTestResult, setMimoTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   const fetchStats = async () => {
     // Only show skeleton on first load, not on background refresh
@@ -510,6 +519,62 @@ export function Profile() {
     setAiSaving(false);
   };
 
+  // ===== MiMo Voice handlers =====
+  const openMimoModal = () => {
+    setMimoKey('');
+    setShowMimoKey(false);
+    setMimoError('');
+    setMimoTestResult(null);
+    setMimoTesting(false);
+    setMimoSaving(false);
+    setMimoModalOpen(true);
+  };
+
+  const handleTestMimo = async () => {
+    if (!mimoKey.trim()) { setMimoError('请先输入 MiMo API Key'); return; }
+    setMimoTesting(true);
+    setMimoError('');
+    setMimoTestResult(null);
+    try {
+      const res = await fetch('/api/mimo-proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          apiKey: mimoKey.trim(),
+          model: 'mimo-v2.5-tts',
+          messages: [
+            { role: 'user', content: 'Say hello.' },
+            { role: 'assistant', content: 'Hello.' },
+          ],
+          audio: { format: 'wav', voice: '冰糖' },
+          max_tokens: 10,
+        }),
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        setMimoTestResult({ success: false, message: `API 错误: ${res.status} ${txt.slice(0, 100)}` });
+      } else {
+        setMimoTestResult({ success: true, message: 'MiMo API Key 有效，连接成功！' });
+      }
+    } catch (err: any) {
+      setMimoTestResult({ success: false, message: `连接失败: ${err.message.slice(0, 100)}` });
+    } finally {
+      setMimoTesting(false);
+    }
+  };
+
+  const handleSaveMimo = async () => {
+    if (!user) return;
+    if (!mimoTestResult?.success) { setMimoError('请先测试连接通过再保存'); return; }
+    setMimoSaving(true);
+    setMimoError('');
+    const { error } = await supabase.rpc('save_mimo_api_key', { p_key: mimoKey.trim() });
+    if (error) { setMimoError(error.message); setMimoSaving(false); return; }
+    await refreshUser();
+    setMimoModalOpen(false);
+    setMimoSaving(false);
+  };
+
   if (!user) return null;
 
   const level = getLevel();
@@ -808,9 +873,83 @@ export function Profile() {
                 {user.ai_configured ? '修改配置' : '配置 AI'}
               </Button>
             </div>
+
+            {/* MiMo Voice Settings */}
+            <div className="glass-card rounded-xl p-5">
+              <h3 className="font-semibold mb-3 flex items-center gap-2">
+                <Mic className="h-4 w-4" />语音设置 (MiMo)
+              </h3>
+              <div className="space-y-2 mb-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">状态</span>
+                  {user.mimo_configured ? (
+                    <Badge variant="success" className="text-xs"><CheckCircle className="h-3 w-3 mr-1" />已配置</Badge>
+                  ) : (
+                    <Badge variant="warning" className="text-xs"><XCircle className="h-3 w-3 mr-1" />未配置</Badge>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  配置后可在 AI 聊天中使用语音输入和语音播报功能
+                </p>
+              </div>
+              <Button variant="outline" size="sm" className="w-full" onClick={openMimoModal}>
+                <Plug className="h-3.5 w-3.5 mr-1" />
+                {user.mimo_configured ? '修改配置' : '配置 MiMo Key'}
+              </Button>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* ===== MiMo Voice Config Modal ===== */}
+      <Modal open={mimoModalOpen} onClose={() => setMimoModalOpen(false)} title="MiMo 语音配置">
+        <div className="space-y-4">
+          <div>
+            <label className="text-sm font-medium mb-1.5 block">
+              MiMo API Key
+              <a href="https://www.xiaomimimo.com" target="_blank" rel="noopener noreferrer" className="ml-1 text-primary hover:underline text-xs font-normal">
+                获取 Key →
+              </a>
+            </label>
+            <div className="relative">
+              <Input
+                type={showMimoKey ? 'text' : 'password'}
+                value={mimoKey}
+                onChange={(e) => setMimoKey(e.target.value)}
+                placeholder="输入 MiMo API Key..."
+                className="pr-10"
+              />
+              <button
+                type="button"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                onClick={() => setShowMimoKey(!showMimoKey)}
+              >
+                {showMimoKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">支持功能</span>
+            <Badge variant="secondary" className="text-xs">ASR 语音识别 + TTS 语音合成</Badge>
+          </div>
+          {mimoError && <p className="text-sm text-destructive">{mimoError}</p>}
+          {mimoTestResult && (
+            <div className={`p-3 rounded-md text-sm ${mimoTestResult.success ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-600'}`}>
+              {mimoTestResult.message}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Button variant="outline" className="flex-1" onClick={handleTestMimo} disabled={!mimoKey.trim() || mimoTesting}>
+              {mimoTesting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
+              测试连接
+            </Button>
+            <Button className="flex-1" onClick={handleSaveMimo} disabled={mimoSaving}>
+              {mimoSaving ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
+              保存
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* ===== Edit Profile Modal ===== */}
       <Modal open={editModalOpen} onClose={() => setEditModalOpen(false)} title="编辑资料">

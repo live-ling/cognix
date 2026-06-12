@@ -9,6 +9,7 @@ import { UserAvatar } from "@/components/user-avatar"
 const navLinks = [
   { to: "/", label: "首页" },
   { to: "/square", label: "广场" },
+  { to: "/ai-chat", label: "AI 聊天" },
   { to: "/profile", label: "我的" },
   { to: "/banks", label: "题库" },
   { to: "/practice", label: "练习" },

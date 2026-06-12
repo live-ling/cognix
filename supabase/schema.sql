@@ -51,6 +51,7 @@ create table public.profiles (
   ai_api_key text,
   ai_base_url text,
   ai_model text,
+  mimo_api_key text,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
@@ -150,6 +151,36 @@ stable
 as $$
   select ai_api_key is not null and ai_api_key != ''
   from public.profiles where id = auth.uid() limit 1;
+$$;
+
+-- MiMo API Key functions (voice ASR/TTS)
+
+create or replace function public.save_mimo_api_key(p_key text)
+returns void
+language plpgsql
+security definer set search_path = 'public'
+as $$
+begin
+  update public.profiles
+  set mimo_api_key = case
+    when p_key is null or p_key = '' then null
+    else p_key
+  end
+  where id = auth.uid();
+end;
+$$;
+
+create or replace function public.get_mimo_api_key()
+returns text
+language plpgsql
+security definer set search_path = 'public'
+as $$
+declare
+  v_key text;
+begin
+  select mimo_api_key into v_key from public.profiles where id = auth.uid();
+  return coalesce(v_key, '');
+end;
 $$;
 
 
@@ -329,7 +360,53 @@ create policy "Users can CRUD own challenge records"
   with check ((select auth.uid()) = user_id);
 
 
--- 9. Share Requests (审批分享申请)
+-- 9. Chat Sessions & Messages (AI chat history)
+create table public.chat_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  title text not null default '新对话',
+  created_at timestamptz default now()
+);
+
+create index idx_chat_sessions_user on public.chat_sessions(user_id, created_at desc);
+
+alter table public.chat_sessions enable row level security;
+
+create policy "Users can CRUD own chat sessions"
+  on public.chat_sessions for all
+  to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
+create table public.chat_messages (
+  id uuid primary key default gen_random_uuid(),
+  session_id uuid not null references public.chat_sessions(id) on delete cascade,
+  role text not null check (role in ('user', 'assistant', 'system')),
+  content text not null,
+  question_id uuid references public.questions(id) on delete set null,
+  created_at timestamptz default now()
+);
+
+create index idx_chat_messages_session on public.chat_messages(session_id, created_at);
+
+alter table public.chat_messages enable row level security;
+
+create policy "Users can CRUD own chat messages"
+  on public.chat_messages for all
+  to authenticated
+  using (
+    (select auth.uid()) = (
+      select user_id from public.chat_sessions where id = chat_messages.session_id
+    )
+  )
+  with check (
+    (select auth.uid()) = (
+      select user_id from public.chat_sessions where id = chat_messages.session_id
+    )
+  );
+
+
+-- 10. Share Requests (审批分享申请)
 create table public.share_requests (
   id uuid primary key default gen_random_uuid(),
   bank_id uuid not null references public.banks(id) on delete cascade,
